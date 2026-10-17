@@ -1,0 +1,10 @@
+name: B3-T0G3TH3R
+author: ""
+clients:
+  player:
+    runtime: browser
+    default: true
+  controller:
+    runtime: browser
+  display:
+    runtime: browser
