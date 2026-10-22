@@ -41,14 +41,85 @@ export default {
     min: 0,
     max: 100,
   },
-  // Relative tolerance under which two players' analysis features match.
-  delta: {
+  // ---- Shared metronome (see src/lib/metronome.js) ----
+  // Time between two pulses, in milliseconds.
+  pulsePeriod: {
     type: 'float',
-    default: 0.1,
+    default: 500,
+    min: 200,
+    max: 2000,
+  },
+  // Pulses in a bar, the time unit in which synchronisation is evaluated.
+  pulsesPerBar: {
+    type: 'integer',
+    default: 4,
+    min: 1,
+    max: 16,
+  },
+  // Sync time (seconds) of the first pulse of bar 0, set by the server when the
+  // game starts playing and whenever the pulse or the bar changes. 0: no pulse.
+  metronomeOrigin: {
+    type: 'float',
+    default: 0,
+  },
+  // Phones also click on every pulse.
+  click: {
+    type: 'boolean',
+    default: false,
+  },
+  // ---- Synchronisation (see src/lib/sync-index.js) ----
+  // Weight of each layer in a pair's index; 0 leaves the layer out.
+  weightTouch: {
+    type: 'float',
+    default: 1,
     min: 0,
     max: 1,
   },
-  // Indexes of the players currently matched, as [[...indexes]], set by the server.
+  weightTilt: {
+    type: 'float',
+    default: 1,
+    min: 0,
+    max: 1,
+  },
+  weightSound: {
+    type: 'float',
+    default: 1,
+    min: 0,
+    max: 1,
+  },
+  // Share of the phase lock (acting on the same beat) against the CPR index
+  // (moving with the same rhythm) in each layer's index.
+  phaseWeight: {
+    type: 'float',
+    default: 0.5,
+    min: 0,
+    max: 1,
+  },
+  // Recurrence radius, relative to the spread of each player's signal.
+  tolerance: {
+    type: 'float',
+    default: 0.5,
+    min: 0.05,
+    max: 2,
+  },
+  // Index from which players count as synchronised: they light up and score.
+  // 0.4 is the value from which synchronisation is considered remarkable in
+  // Varni et al. (2012).
+  syncThreshold: {
+    type: 'float',
+    default: 0.4,
+    min: 0,
+    max: 1,
+  },
+  // Result of the last evaluated bar, set by the server:
+  // { bar, origin, duration, group, players: { [id]: { index, partner, layers } } }
+  sync: {
+    type: 'any',
+    default: null,
+    nullable: true,
+  },
+  // Indexes of the players synchronised in the last bar, as [[...indexes]], set by
+  // the server.
   matched: {
     type: 'any',
     default: [[]],

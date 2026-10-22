@@ -1,7 +1,10 @@
 type: development
 port: 8000
 serverAddress: ''
-useHttps: false
+# Motion sensors (tilt layer) are only available to pages served over https.
+# Without certificate files, soundworks generates a self-signed certificate
+# (browsers warn about it once); see the README to use trusted ones.
+useHttps: true
 crossOriginIsolated: true
 httpsInfos:
   cert: null

@@ -27,6 +27,16 @@ const SOUND_PARAMS = [
 
 const PHASES = ['waiting', 'playing', 'scores', 'end'];
 
+// Global parameters of the synchronisation (see src/lib/sync-index.js).
+const SYNC_PARAMS = [
+  { key: 'weightTouch',   label: 'Touch layer', min: 0,    max: 1, step: 0.05, digits: 2 },
+  { key: 'weightTilt',    label: 'Tilt layer',  min: 0,    max: 1, step: 0.05, digits: 2 },
+  { key: 'weightSound',   label: 'Sound layer', min: 0,    max: 1, step: 0.05, digits: 2 },
+  { key: 'phaseWeight',   label: 'Phase lock',  min: 0,    max: 1, step: 0.05, digits: 2 },
+  { key: 'tolerance',     label: 'Tolerance',   min: 0.05, max: 2, step: 0.05, digits: 2 },
+  { key: 'syncThreshold', label: 'Threshold',   min: 0,    max: 1, step: 0.01, digits: 2 },
+];
+
 async function main($container) {
   const config = loadConfig();
   const client = new Client(config);
@@ -64,6 +74,34 @@ async function main($container) {
     const raw = global.get('matched');
     return new Set(Array.isArray(raw?.[0]) ? raw[0] : []);
   }
+
+  const percent = value => `${Math.round(value * 100)}%`;
+
+  // A player's result in the last bar: index and per-layer indexes.
+  function syncSummary(index) {
+    const result = global.get('sync')?.players?.[index];
+    if (!result || result.partner === null) return '--';
+    const layers = Object.entries(result.layers)
+      .map(([name, value]) => `${name} ${value === null ? '-' : percent(value)}`)
+      .join(' · ');
+    return `${percent(result.index)} with #${result.partner} (${layers})`;
+  }
+
+  const rangeRow = (def, value, onInput) => html`
+    <div class="param-row">
+      <span class="param-label">${def.label}</span>
+      <input
+        class="param-input"
+        type="range"
+        min="${def.min}"
+        max="${def.max}"
+        step="${def.step}"
+        .value="${String(value)}"
+        @input="${(event) => onInput(parseFloat(event.target.value))}"
+      />
+      <span class="param-value">${formatValue(Number(value), def.digits)}</span>
+    </div>
+  `;
 
   const formatValue = (value, digits) => {
     if (!Number.isFinite(value)) return '--';
@@ -179,19 +217,6 @@ async function main($container) {
                 <span class="param-value">${formatValue(global.get('slider'), 0)}</span>
               </div>
               <div class="param-row">
-                <span class="param-label">Match delta</span>
-                <input
-                  class="param-input"
-                  type="range"
-                  min="0"
-                  max="1"
-                  step="0.01"
-                  .value="${String(global.get('delta'))}"
-                  @input="${(event) => global.set({ delta: parseFloat(event.target.value) })}"
-                />
-                <span class="param-value">${formatValue(global.get('delta'), 2)}</span>
-              </div>
-              <div class="param-row">
                 <span class="param-label">Goal</span>
                 <div class="param-list">
                   ${[0, 1, 2].map((i) => html`
@@ -226,6 +251,63 @@ async function main($container) {
                 }}"
               >reset scores</button>
             </section>
+            <section>
+              <h2>Metronome</h2>
+              <div class="param-row">
+                <span class="param-label">Pulse (ms)</span>
+                <input
+                  class="param-number"
+                  type="number"
+                  min="200"
+                  max="2000"
+                  step="10"
+                  .value="${String(global.get('pulsePeriod'))}"
+                  @change="${(event) => {
+                    const value = Math.min(2000, Math.max(200, parseFloat(event.target.value) || 500));
+                    global.set({ pulsePeriod: value });
+                  }}"
+                />
+                <span class="param-value">${formatValue(60000 / global.get('pulsePeriod'), 0)} bpm</span>
+              </div>
+              <div class="param-row">
+                <span class="param-label">Pulses / bar</span>
+                <input
+                  class="param-number"
+                  type="number"
+                  min="1"
+                  max="16"
+                  step="1"
+                  .value="${String(global.get('pulsesPerBar'))}"
+                  @change="${(event) => {
+                    const value = Math.min(16, Math.max(1, Math.round(parseFloat(event.target.value) || 4)));
+                    global.set({ pulsesPerBar: value });
+                  }}"
+                />
+                <span class="param-value">${formatValue(global.get('pulsePeriod') * global.get('pulsesPerBar') / 1000, 1)} s</span>
+              </div>
+              <label class="toggle-row">
+                <span class="toggle-label">CLICK ON PHONES</span>
+                <input
+                  class="toggle-input"
+                  type="checkbox"
+                  .checked="${global.get('click')}"
+                  @change="${(event) => global.set({ click: event.target.checked })}"
+                />
+                <span class="toggle-indicator"></span>
+              </label>
+            </section>
+            <section>
+              <h2>Synchronisation</h2>
+              ${SYNC_PARAMS.map((def) => rangeRow(def, global.get(def.key), (value) => global.set({ [def.key]: value })))}
+              <div class="stat-row">
+                <span class="param-label">Last bar</span>
+                <span class="param-value">${global.get('sync') ? `#${global.get('sync').bar + 1}` : '--'}</span>
+              </div>
+              <div class="stat-row">
+                <span class="param-label">Group sync</span>
+                <span class="param-value">${global.get('sync') ? percent(global.get('sync').group) : '--'}</span>
+              </div>
+            </section>
           </div>
           <div class="controller-center">
             <section>
@@ -249,6 +331,7 @@ async function main($container) {
                         #${index} ${state.get('nickname') || `Player ${index}`}
                         <span class="player-score">${formatValue(state.get('local_score'), 0)} pts</span>
                       </div>
+                      <div class="player-sync">sync ${syncSummary(index)}</div>
                       ${soundParamRows(state.getValues(), (updates) => state.set(updates))}
                     </div>
                   `;
