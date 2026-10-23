@@ -1,7 +1,7 @@
 {
+  "configFormat": "yaml",
   "name": "B3-T0G3TH3R",
-  "createVersion": "5.0.9",
-  "language": "js",
+  "createVersion": "6.0.1",
   "template": "js",
-  "configFormat": "yaml"
+  "templatePackage": "@soundworks/create"
 }
