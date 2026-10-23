@@ -7,10 +7,10 @@ serverAddress: ''
 useHttps: true
 crossOriginIsolated: true
 httpsInfos:
-  cert: null
-  key: null
-baseUrl: ''
+  cert: /Users/lucamorino/Documents/GitHub/localhost+5.pem
+  key: /Users/lucamorino/Documents/GitHub/localhost+5-key.pem
+baseUrl: ""
 auth:
   clients: []
-  login: ''
-  password: ''
+  login: ""
+  password: ""
