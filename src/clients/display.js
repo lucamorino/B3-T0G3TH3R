@@ -5,6 +5,7 @@ import { html, render } from 'lit';
 import pluginSync from '@soundworks/plugin-sync/client.js';
 
 import { playerColor } from './palette.js';
+import { metronomeGrid, gridPosition } from '../lib/metronome.js';
 
 function tryEnterFullscreen() {
   const element = document.documentElement; // Target the entire page
@@ -115,8 +116,8 @@ async function main($container) {
     return `player ${index}`;
   }
 
-  // Indexes of the players currently matched. The server sets `matched` as
-  // [[...indexes]].
+  // Indexes of the players synchronised in the last bar. The server sets
+  // `matched` as [[...indexes]].
   function matchedIndexes() {
     const raw = global.get('matched');
     return new Set(Array.isArray(raw?.[0]) ? raw[0] : []);
@@ -209,6 +210,41 @@ async function main($container) {
     }
     scheduleRender();
   });
+
+  // Synchronisation index of a player in the last bar, as a percentage, or '--'.
+  function syncOf(index) {
+    const result = global.get('sync')?.players?.[index];
+    return result && result.partner !== null ? `${Math.round(result.index * 100)}%` : '--';
+  }
+
+  // Metronome: the pulse strip flashes on every pulse, on every frame, outside of
+  // lit (only opacities change).
+  const PULSE_DECAY = 0.12;
+
+  function currentPosition() {
+    if (global.get('phase') !== 'playing') return null;
+    return gridPosition(metronomeGrid(global), sync.getSyncTime());
+  }
+
+  function barLabel(position) {
+    return position ? String(position.bar + 1) : '--';
+  }
+
+  function drawPulse() {
+    requestAnimationFrame(drawPulse);
+    const strip = document.getElementById('display-pulse');
+    if (!strip) return;
+    const position = currentPosition();
+    const envelope = position ? Math.exp(-position.sincePulse / PULSE_DECAY) : 0;
+    for (let i = 0; i < strip.children.length; i++) {
+      const lit = position !== null && i === position.pulse;
+      strip.children[i].style.opacity = lit ? (0.4 + 0.6 * envelope).toFixed(2) : '0.15';
+    }
+    const bar = document.getElementById('display-bar');
+    if (bar) bar.textContent = barLabel(position);
+  }
+
+  requestAnimationFrame(drawPulse);
 
   function drawRadar() {
     const canvas = document.getElementById('radar-canvas');
@@ -424,6 +460,7 @@ async function main($container) {
                       style="--player-rgb: ${r}, ${g}, ${b}"
                     >
                       <span class="display-player-name">${state.get('nickname') || `Player ${index}`}</span>
+                      <span class="display-player-sync">${syncOf(index)}</span>
                       <span class="display-player-score">${(state.get('local_score') ?? 0).toFixed(0)}</span>
                     </div>
                   `;
@@ -434,9 +471,22 @@ async function main($container) {
         </div>
 
         <div id="display-right" style="${hideInterface ? 'display:none' : ''}">
+          <div id="display-pulse">
+            ${Array.from({ length: global.get('pulsesPerBar') }, (_, i) => html`
+              <span class="pulse-dot ${i === 0 ? 'downbeat' : ''}"></span>
+            `)}
+          </div>
           <h2 class="display-section-title">Analysis</h2>
           <div id="radar-container">
             <canvas id="radar-canvas"></canvas>
+          </div>
+          <div class="score-row">
+            <span class="score-label">BAR</span>
+            <span class="score-value" id="display-bar">--</span>
+          </div>
+          <div class="score-row">
+            <span class="score-label">GROUP SYNC</span>
+            <span class="score-value">${global.get('sync') ? `${Math.round(global.get('sync').group * 100)}%` : '--'}</span>
           </div>
           <div class="score-row">
             <span class="score-label">TIMER</span>

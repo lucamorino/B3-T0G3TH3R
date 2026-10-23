@@ -1,57 +1,123 @@
 # `B3-T0G3TH3R`
 
 An audience participation game piece: every spectator plays a sound instrument on
-their phone, and scores points by tuning their sound with other players'.
+their phone, and scores points by moving in synchronisation with other players,
+on a pulse shared by every device.
 
 The project is built with **soundworks** and **RNBO**. Its architecture follows
 `B3-H4RSH` (browser clients only, the game is run from a browser `controller`),
 and its player instrument and display come from `The Contested Zone` (RNBO pad
-instrument, Essentia analysis, matching and scoring, radar display). There is no
-Max / Ableton Live client and no voice scenes.
+instrument, Essentia analysis, radar display). There is no Max / Ableton Live
+client and no voice scenes.
 
 ## Clients
 
 | Role         | Path          | What it is |
 | ------------ | ------------- | ---------- |
-| `player`     | `/`           | The phone instrument: XY pad driving the RNBO patch, oscilloscope, timer and points, nickname. |
-| `display`    | `/display`    | The projected screen: player cards (lit while matched), radar of every player's sound analysis, timer, scores ranking. |
-| `controller` | `/controller` | The operator panel: game phase, round length, global parameters, and the sound parameters of every player or of each one. |
+| `player`     | `/`           | The phone instrument: XY pad driving the RNBO patch, tilt sensors, visual pulse, oscilloscope, sync index, timer and points, nickname. |
+| `display`    | `/display`    | The projected screen: pulse, player cards (sync index, lit while synchronised), radar of every player's sound analysis, group sync, timer, scores ranking. |
+| `controller` | `/controller` | The operator panel: game phase, round length, metronome, synchronisation settings, and the sound parameters of every player or of each one. |
 
 ## How the game works
 
 The controller moves the game through four phases (`phase` in `src/global/global.js`):
 
 - **waiting**: players read the instructions while a hum plays; the display shows how to join.
-- **playing**: the pad is live. Each phone analyses its own sound (loudness and
-  sharpness from RNBO, spectral centroid, complexity and dissonance from Essentia)
-  and publishes it at 10Hz while the player holds the pad. The server compares
-  active players: two players match when every feature of one is within `delta`
-  (relative) of the other's. Matched phones flash in the player's colour and count
-  1 point per second; the global score is the sum of every player's points. With a
-  round length set, the server moves on to the scores when the time runs out.
+- **playing**: the metronome runs and the pad is live (see below). Synchronised
+  phones flash in the player's colour on the pulses and score points; the global
+  score is the sum of every player's points. With a round length set, the server
+  moves on to the scores when the time runs out.
 - **scores**: phones show the global and their own points, the display the ranking.
 - **end**: game over.
+
+## Synchronisation
+
+The game evaluates the sensory-motor synchronisation of the players, on three
+layers:
+
+1. **touch**: the movement of the finger on the pad (x, y);
+2. **tilt**: the tilt of the phone (gravity along its x and y axes, from the
+   motion sensors, which need https, see below);
+3. **sound**: how the features of the player's sound evolve (loudness, sharpness,
+   spectral centroid, dissonance, spectral complexity).
+
+**Shared metronome.** When the game starts playing, the server anchors a grid of
+pulses on the sync time (`pulsePeriod` ms apart, `pulsesPerBar` to a bar). Every
+phone shows the pulse (a row of dots, the current one lit, and a ring flashing
+around the pad, stronger on the first pulse of the bar), and can click on it. The
+pulse and the bar are set in the controller; a change applies from the next bar
+line. See `src/lib/metronome.js`.
+
+**The bar is the time unit.** Each phone samples the three layers at 20Hz on the
+grid during a bar, and sends them to the server once the bar is over (one message
+per bar, rather than a continuous stream). Half a second after the end of each bar
+the server evaluates it:
+
+- For every player and layer, it computes the probability of recurrence p(τ) of
+  the signal's velocity (how likely it comes back, within a tolerance, to where it
+  was τ samples earlier), as in the CPR index of Varni et al., *Interactive
+  sonification of synchronisation of motoric behaviour in social active listening
+  to music with mobile devices* (J Multimodal User Interfaces, 2012). A player
+  who does not move in a layer has no index in it.
+- For every pair of players and layer: the **CPR index**, the correlation of their
+  normalised p̂(τ), close to 1 when they move with the same rhythm; and the
+  **phase lock**, the correlation of their signals at lag 0, close to 1 when they
+  also move on the same beat (CPR alone does not see a constant offset, which the
+  shared pulse makes meaningful). The layer index mixes both (`phaseWeight`).
+- A pair's index is the weighted mean of the layers both players are active in
+  (weights `weightTouch`, `weightTilt`, `weightSound`; 0 leaves a layer out).
+- A player's index is their best pair's. Players at or above `syncThreshold`
+  (0.4 by default, from the paper) are synchronised: they flash during the next
+  bar and score their index for every second of the bar (up to 1 point per second).
+  The group index is the mean over all pairs.
+
+The algorithm is in `src/lib/sync-index.js`, the scheduling in `src/server.js`.
+
+## Players' identity
 
 Players keep their index, nickname and score when their page reloads (screen lock,
 app switch, network blip): each phone keeps a device id in its localStorage, and
 the server's player registry gives a returning device its slot back (see
 `src/server.js`). Up to 50 players (`CAPACITY` in `src/server.js`).
 
+## Https and motion sensors
+
+Browsers only give access to the motion sensors to pages served over https, so the
+server runs in https (`config/env-default.yaml`). Without certificate files it
+generates a self-signed certificate: each phone has to accept a security warning
+once. To avoid it, create a certificate trusted by the phones, for example with
+[mkcert](https://github.com/FiloSottile/mkcert) (as for Xplosive Collision), and
+point to it in an env config file:
+
+```yaml
+useHttps: true
+httpsInfos:
+  cert: /path/to/cert.pem
+  key: /path/to/key.pem
+```
+
+On iOS the phone asks the player for access to the motion sensors on the first
+tap. A player who refuses, or a phone without sensors, still plays, without the
+tilt layer.
+
 ## Files
 
 ```
 src/
-├─ server.js              plugins, phases and round timer, matching, player registry, global score
-├─ global/global.js       `global` state: phase, round, slider, delta, goal, matched, scores
+├─ server.js              plugins, phases and round timer, metronome, bar evaluation, player registry, global score
+├─ global/global.js       `global` state: phase, round, metronome, synchronisation settings and results, scores
 ├─ clients/
 │  ├─ user.js             `user` state (one per player): identity, score, sound parameters
-│  ├─ control.js          `control` state (one per player): pad activity and sound analysis
+│  ├─ control.js          `control` state (one per player): pad activity, sound analysis, bar reports
 │  ├─ player.js           phone instrument
 │  ├─ display.js          projected display
 │  ├─ controller.js       operator panel
 │  ├─ identity.js         device id and nickname screen
 │  └─ palette.js          player colours, shared by every client
-├─ lib/                   audio helpers (sample loading, Opus support, hum loop)
+├─ lib/
+│  ├─ metronome.js        shared pulse grid
+│  ├─ sync-index.js       synchronisation index (CPR and phase lock)
+│  └─ ...                 audio helpers (sample loading, Opus support, hum loop)
 └─ styles/app.scss
 public/assets/
 ├─ rnbo_export/           the RNBO instrument patch (from The Contested Zone)
@@ -67,12 +133,12 @@ npm install
 npm run dev        # build, watch and run the server
 ```
 
-Then open `http://<server-ip>:8000` on the phones, `/display` on the projector and
+Then open `https://<server-ip>:8000` on the phones, `/display` on the projector and
 `/controller` on the operator's computer. `npm run build` then `npm run start` runs
 the server without watching.
 
 Several players can be emulated in one browser window with `?emulate=n`, e.g.
-`http://127.0.0.1:8000?emulate=4`.
+`https://127.0.0.1:8000?emulate=4`.
 
 ### `ENV` and `PORT`
 
