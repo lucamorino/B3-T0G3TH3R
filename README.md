@@ -6,9 +6,11 @@ on a pulse shared by every device.
 
 The project is built with **soundworks** and **RNBO**. Its architecture follows
 `B3-H4RSH` (browser clients only, the game is run from a browser `controller`),
-and its player instrument and display come from `The Contested Zone` (RNBO pad
-instrument, Essentia analysis, radar display). There is no Max / Ableton Live
-client and no voice scenes.
+its player interface and display come from `The Contested Zone` (pad, Essentia
+analysis, radar display), and its instrument and audio sharing from
+`NINA_B3-H4RSH`, the No-Input Network Audiosystem (RNBO patch with an audio input,
+phones sending their sound to each other over WebRTC). There is no Max / Ableton
+Live client and no voice scenes.
 
 ## Clients
 
@@ -16,7 +18,7 @@ client and no voice scenes.
 | ------------ | ------------- | ---------- |
 | `player`     | `/`           | The phone instrument: XY pad driving the RNBO patch, tilt sensors, visual pulse, oscilloscope, sync index, timer and points, nickname. |
 | `display`    | `/display`    | The projected screen: pulse, player cards (sync index, lit while synchronised), radar of every player's sound analysis, group sync, timer, scores ranking. |
-| `controller` | `/controller` | The operator panel: game phase, round length, metronome, synchronisation settings, and the sound parameters of every player or of each one. |
+| `controller` | `/controller` | The operator panel: game phase, round length, metronome, synchronisation settings, audio sharing matrix, and the sound parameters of every player or of each one. |
 
 ## How the game works
 
@@ -73,6 +75,32 @@ the server evaluates it:
 
 The algorithm is in `src/lib/sync-index.js`, the scheduling in `src/server.js`.
 
+## Audio sharing
+
+Each phone runs the `B3-H4RSH_NINA` RNBO patch, which has an audio input: the
+operator routes the sound of any phone into the input of any other one with the
+**audio sharing matrix** in the controller (row: the phone that sends, column: the
+phone that receives; `ring` sends each phone to the next one, `clear` removes every
+route). A phone processes what it receives, and its output goes on to the phones
+it sends to, so routes can form chains and feedback loops between phones.
+
+Each route is a peer-to-peer WebRTC connection, opened by the sending phone: its
+RNBO output goes into a `MediaStream` sent to the receiving phone, which plays it
+into its RNBO input (see `src/lib/audio-sharing.js`). The server only relays the
+signaling messages between phones and holds the routes (the `routing` state); a
+cell of the matrix turns green once its connection is established. Routes stay
+when a phone reloads its page: it rejoins as the same player and its connections
+are opened again. Each phone sends one audio stream per route it is the source
+of, so keep a phone's routes to a few.
+
+The phones find each other through their local network addresses; on a network
+with internet access a STUN server also helps across networks.
+
+As in NINA_B3-H4RSH, the patch plays while the pad is touched (`start`), and each
+new touch triggers it (`trigger`). The sound parameters of each player (volume,
+preset, mod, fade, feedback gain and trim, bandpass and phase Q, style) are set in
+the controller; a preset is loaded first and the parameters applied on top of it.
+
 ## Players' identity
 
 Players keep their index, nickname and score when their page reloads (screen lock,
@@ -104,10 +132,10 @@ tilt layer.
 
 ```
 src/
-├─ server.js              plugins, phases and round timer, metronome, bar evaluation, player registry, global score
+├─ server.js              plugins, phases and round timer, metronome, bar evaluation, WebRTC signaling, player registry, global score
 ├─ global/global.js       `global` state: phase, round, metronome, synchronisation settings and results, scores
 ├─ clients/
-│  ├─ user.js             `user` state (one per player): identity, score, sound parameters
+│  ├─ user.js             `user` state (one per player): identity, score, sound parameters, established audio routes
 │  ├─ control.js          `control` state (one per player): pad activity, sound analysis, bar reports
 │  ├─ player.js           phone instrument
 │  ├─ display.js          projected display
@@ -117,10 +145,11 @@ src/
 ├─ lib/
 │  ├─ metronome.js        shared pulse grid
 │  ├─ sync-index.js       synchronisation index (CPR and phase lock)
+│  ├─ audio-sharing.js    WebRTC audio routes between phones
 │  └─ ...                 audio helpers (sample loading, Opus support, hum loop)
 └─ styles/app.scss
 public/assets/
-├─ rnbo_export/           the RNBO instrument patch (from The Contested Zone)
+├─ rnbo_export/           the RNBO instrument patch (B3-H4RSH_NINA, from NINA_B3-H4RSH)
 ├─ rnbo/1.4.2/            RNBO runtime, served locally
 ├─ essentia/              Essentia.js (WASM) for the spectral analysis
 └─ samples/               hum (.wav and Opus .webm, see tools/encode-audio.sh)

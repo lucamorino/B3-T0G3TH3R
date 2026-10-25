@@ -23,23 +23,9 @@ export default {
     min: 0,
     max: 3600,
   },
-  // Value sent to the RNBO `start` inport while playing (0 outside of `playing`).
-  start: {
-    type: 'float',
-    default: 1,
-    min: 0,
-    max: 1,
-  },
   goal: {
     type: 'any',
     default: [30, 30, 30],
-  },
-  // Third value of the RNBO `touch` message, shared by every player.
-  slider: {
-    type: 'float',
-    default: 30,
-    min: 0,
-    max: 100,
   },
   // ---- Shared metronome (see src/lib/metronome.js) ----
   // Time between two pulses, in milliseconds.

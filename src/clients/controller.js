@@ -16,13 +16,14 @@ import { playerColor } from './palette.js';
 // edited as that many numbers.
 const SOUND_PARAMS = [
   { key: 'volume',  label: 'Volume',  min: 0,     max: 1,     step: 0.01,  digits: 2 },
+  { key: 'preset',  label: 'Preset',  min: 0,     max: 15,    step: 1,     digits: 0 },
   { key: 'mod',     label: 'Mod',     min: 0,     max: 1,     step: 0.01,  digits: 2 },
   { key: 'fade',    label: 'Fade',    min: 10,    max: 10000, step: 10,    digits: 0 },
   { key: 'fb_gain', label: 'FB Gain', min: 0.001, max: 3.99,  step: 0.001, digits: 3 },
   { key: 'fb_trim', label: 'FB Trim', min: 0.001, max: 3.99,  step: 0.001, digits: 3 },
+  { key: 'bp_q',    label: 'BP Q',    min: 0.001, max: 0.99,  step: 0.001, digits: 3 },
+  { key: 'phase_q', label: 'Phase Q', min: 0.001, max: 0.99,  step: 0.001, digits: 3 },
   { key: 'style',   label: 'Style',   size: 3 },
-  { key: 'env',     label: 'Env',     size: 2 },
-  { key: 'LFO',     label: 'LFO',     size: 3 },
 ];
 
 const PHASES = ['waiting', 'playing', 'scores', 'end'];
@@ -53,6 +54,7 @@ async function main($container) {
 
   const global = await client.stateManager.attach('global');
   const userCollection = await client.stateManager.getCollection('user');
+  const routing = await client.stateManager.attach('routing');
 
   // Values last sent to every player from the "All players" card, so its inputs
   // show something sensible. Starts from the schema defaults.
@@ -73,6 +75,94 @@ async function main($container) {
   function matchedIndexes() {
     const raw = global.get('matched');
     return new Set(Array.isArray(raw?.[0]) ? raw[0] : []);
+  }
+
+  // ── Routing matrix (audio sharing, see src/lib/audio-sharing.js) ──────────
+  // Requested routes are in the `routing` state; each phone reports in its
+  // `user` state the routes it has actually established.
+  function isRouted(from, to) {
+    return (routing.get('connections') ?? []).some((c) => c.from === from && c.to === to);
+  }
+
+  function isLive(from, to) {
+    const state = players().find((s) => s.get('id') === from);
+    return (state?.get('connectedTo') ?? []).includes(to);
+  }
+
+  function toggleRoute(from, to) {
+    const connections = routing.get('connections') ?? [];
+    routing.set({
+      connections: isRouted(from, to)
+        ? connections.filter((c) => !(c.from === from && c.to === to))
+        : [...connections, { from, to }],
+    });
+  }
+
+  // Each connected player sends to the next one, the last to the first.
+  function routeRing() {
+    const indexes = players().map((s) => s.get('id'));
+    if (indexes.length < 2) return;
+    routing.set({
+      connections: indexes.map((from, i) => ({ from, to: indexes[(i + 1) % indexes.length] })),
+    });
+  }
+
+  function routingMatrix(list) {
+    if (list.length < 2) return html`<p class="empty-state">Connect two players or more to route their sound.</p>`;
+    const routeCount = (routing.get('connections') ?? []).length;
+    return html`
+      <div class="matrix-scroll">
+        <table class="matrix">
+          <thead>
+            <tr>
+              <th class="matrix-corner">out ↓ / in →</th>
+              ${list.map((dst) => html`
+                <th class="matrix-head" style="--player-color: ${playerColor(dst.get('id')).stroke}" title="${dst.get('nickname') || `Player ${dst.get('id')}`}">
+                  <span class="player-dot"></span>${dst.get('id')}
+                </th>
+              `)}
+            </tr>
+          </thead>
+          <tbody>
+            ${list.map((src) => {
+              const from = src.get('id');
+              return html`
+                <tr>
+                  <th class="matrix-label" style="--player-color: ${playerColor(from).stroke}">
+                    <span class="player-dot"></span>#${from} ${src.get('nickname') || ''}
+                  </th>
+                  ${list.map((dst) => {
+                    const to = dst.get('id');
+                    const self = from === to;
+                    const routed = !self && isRouted(from, to);
+                    const live = routed && isLive(from, to);
+                    return html`
+                      <td class="matrix-cell">
+                        <button
+                          class="matrix-btn ${routed ? 'routed' : ''} ${live ? 'live' : ''} ${self ? 'self' : ''}"
+                          type="button"
+                          title="${self ? '' : `#${from} → #${to}${routed ? (live ? ' (connected)' : ' (connecting)') : ''}`}"
+                          ?disabled="${self}"
+                          @click="${() => toggleRoute(from, to)}"
+                        ></button>
+                      </td>
+                    `;
+                  })}
+                </tr>
+              `;
+            })}
+          </tbody>
+        </table>
+      </div>
+      <div class="matrix-actions">
+        <button class="phase-button" type="button" @click="${routeRing}">ring</button>
+        <button class="phase-button" type="button" ?disabled="${routeCount === 0}" @click="${() => routing.set({ connections: [] })}">clear (${routeCount})</button>
+      </div>
+      <p class="matrix-legend">
+        <span class="matrix-btn routed"></span> requested
+        <span class="matrix-btn routed live"></span> connected
+      </p>
+    `;
   }
 
   const percent = value => `${Math.round(value * 100)}%`;
@@ -193,29 +283,6 @@ async function main($container) {
                 />
                 <span class="param-value">${global.get('duration') > 0 ? '' : 'no time'}</span>
               </div>
-              <label class="toggle-row">
-                <span class="toggle-label">START</span>
-                <input
-                  class="toggle-input"
-                  type="checkbox"
-                  .checked="${global.get('start') > 0}"
-                  @change="${(event) => global.set({ start: event.target.checked ? 1 : 0 })}"
-                />
-                <span class="toggle-indicator"></span>
-              </label>
-              <div class="param-row">
-                <span class="param-label">Slider</span>
-                <input
-                  class="param-input"
-                  type="range"
-                  min="0"
-                  max="100"
-                  step="1"
-                  .value="${String(global.get('slider'))}"
-                  @input="${(event) => global.set({ slider: parseFloat(event.target.value) })}"
-                />
-                <span class="param-value">${formatValue(global.get('slider'), 0)}</span>
-              </div>
               <div class="param-row">
                 <span class="param-label">Goal</span>
                 <div class="param-list">
@@ -311,6 +378,10 @@ async function main($container) {
           </div>
           <div class="controller-center">
             <section>
+              <h2>Audio sharing</h2>
+              ${routingMatrix(list)}
+            </section>
+            <section>
               <h2>Players sound</h2>
               <div class="user-params">
                 <div class="user-params-card">
@@ -359,6 +430,7 @@ async function main($container) {
   renderApp();
   global.onUpdate(() => scheduleRender());
   userCollection.onChange(() => scheduleRender());
+  routing.onUpdate(() => scheduleRender());
 }
 
 launcher.execute(main, {

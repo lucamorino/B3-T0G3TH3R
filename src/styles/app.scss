@@ -1089,3 +1089,113 @@ body.controller-client {
     grid-template-columns: 1fr;
   }
 }
+
+/* ---------- Controller: audio sharing matrix (after NINA_B3-H4RSH) ---------- */
+
+.matrix-scroll {
+  overflow-x: auto;
+}
+
+.matrix {
+  border-collapse: collapse;
+  font-size: 11px;
+
+  th,
+  td {
+    border: 1px solid rgba(255, 255, 255, 0.07);
+    text-align: center;
+  }
+}
+
+.matrix-corner {
+  padding: 4px 6px;
+  text-align: left;
+  font-weight: 400;
+  white-space: nowrap;
+  color: rgba(244, 244, 244, 0.35);
+}
+
+.matrix-head,
+.matrix-label {
+  padding: 4px 6px;
+  font-weight: 700;
+  letter-spacing: 1px;
+  white-space: nowrap;
+  color: rgba(244, 244, 244, 0.6);
+
+  .player-dot {
+    display: inline-block;
+    margin-right: 4px;
+    vertical-align: middle;
+  }
+}
+
+.matrix-label {
+  text-align: left;
+  max-width: 160px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.matrix-cell {
+  padding: 3px !important;
+}
+
+// requested route: white; established: green (as in NINA_B3-H4RSH)
+.matrix-btn {
+  display: inline-block;
+  width: 28px;
+  height: 28px;
+  vertical-align: middle;
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  cursor: pointer;
+  transition: background 0.08s ease, border-color 0.08s ease;
+
+  &:hover:not(:disabled) {
+    border-color: rgba(255, 255, 255, 0.4);
+  }
+
+  &.routed {
+    background: var(--sw-font-color);
+    border-color: var(--sw-font-color);
+  }
+
+  &.live {
+    background: rgba(60, 200, 90, 0.85);
+    border-color: rgba(60, 200, 90, 0.85);
+  }
+
+  &.self {
+    background: transparent;
+    border-color: rgba(255, 255, 255, 0.04);
+    cursor: default;
+  }
+}
+
+.matrix-actions {
+  display: flex;
+  gap: 6px;
+  margin-top: 10px;
+
+  .phase-button {
+    flex: 0 0 auto;
+    padding: 8px 16px;
+  }
+}
+
+.matrix-legend {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 8px 0 0;
+  font-size: 11px;
+  color: var(--sw-light-font-color);
+
+  .matrix-btn {
+    width: 12px;
+    height: 12px;
+    cursor: default;
+    margin-left: 8px;
+  }
+}

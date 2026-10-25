@@ -14,6 +14,7 @@ import { playerColor } from './palette.js';
 import { getDeviceId, waitForAssignment, openNicknameScreen, showGameFull } from './identity.js';
 import { canDecodeOpus } from '../lib/audio-format.js';
 import { metronomeGrid, gridPosition, samplesPerBar, SAMPLE_RATE } from '../lib/metronome.js';
+import setupAudioSharing from '../lib/audio-sharing.js';
 
 import pluginPlatformInit from '@soundworks/plugin-platform-init/client.js';
 import pluginSync from '@soundworks/plugin-sync/client.js';
@@ -233,15 +234,26 @@ async function main($container) {
       return;
   }
 
-  // Connect the device to the web audio graph (dry + reverb send)
+  // Connect the device to the web audio graph (volume, then dry + reverb send)
   const dryGain = audioContext.createGain();
   dryGain.gain.value = 0.5;
   dryGain.connect(outputNode);
+  const volumeGain = audioContext.createGain();
+  volumeGain.gain.value = user.get('volume');
   const padGain = audioContext.createGain();
   padGain.gain.value = 0.25;
-  device.node.connect(padGain);
+  device.node.connect(volumeGain);
+  volumeGain.connect(padGain);
   padGain.connect(dryGain);
   padGain.connect(reverbConvolver);
+
+  // Audio shared with other phones (see src/lib/audio-sharing.js): this phone's
+  // RNBO output goes to the phones it is routed to in the controller's matrix,
+  // and what they send comes into its RNBO input.
+  const sharedInput = audioContext.createGain();
+  sharedInput.connect(device.node);
+  setupAudioSharing({ client, audioContext, index, source: device.node, destination: sharedInput, user })
+    .catch((err) => console.error('[webrtc] could not set up audio sharing:', err));
 
   // Analysis values are collected here and sent together on a fixed 10Hz tick, the
   // rate the server evaluates matches at. Sent as they were produced, they made ~49
@@ -451,9 +463,8 @@ async function main($container) {
     renderApp();
 
     if (phase === 'playing') {
-      sendMessageToInport(device, 'start', [global.get('start')]);
       const last = device._lastTouch || [50, 50];
-      sendMessageToInport(device, 'touch', [last[0], last[1], global.get('slider')]);
+      sendMessageToInport(device, 'touch', last);
       padGain.gain.cancelScheduledValues(audioContext.currentTime);
       padGain.gain.setValueAtTime(0, audioContext.currentTime);
       padGain.gain.linearRampToValueAtTime(0.25, audioContext.currentTime + 0.5);
@@ -479,13 +490,6 @@ async function main($container) {
       setupTimer();
       renderApp();
     }
-    if ('start' in updates && global.get('phase') === 'playing') {
-      sendMessageToInport(device, 'start', [updates['start']]);
-    }
-    if ('slider' in updates) {
-      const last = device._lastTouch || [50, 50];
-      sendMessageToInport(device, 'touch', [last[0], last[1], updates['slider']]);
-    }
     if ('global_score' in updates) {
       renderApp();
     }
@@ -506,19 +510,29 @@ async function main($container) {
   });
 
   // Sound parameters set from the controller, forwarded to the RNBO device.
-  function applySound(values) {
-    if ('style' in values) sendMessageToInport(device, 'style', values['style']);
-    if ('mod' in values) sendMessageToInport(device, 'mod', [values['mod']]);
-    if ('fade' in values) sendMessageToInport(device, 'fade', [values['fade']]);
-    if ('env' in values) sendMessageToInport(device, 'env', values['env']);
-    if ('LFO' in values) sendMessageToInport(device, 'LFO', values['LFO']);
-    if ('volume' in values) sendMessageToInport(device, 'volume', [values['volume']]);
-    for (const name of ['fb_gain', 'fb_trim']) {
+  const presets = patcher.presets || [];
+  const RNBO_PARAMS = ['fb_gain', 'fb_trim', 'bp_q', 'phase_q'];
+
+  function setParams(values) {
+    for (const name of RNBO_PARAMS) {
       if (name in values) {
         const param = getParameter(device, name);
         if (param) param.value = values[name];
       }
     }
+  }
+
+  function applySound(values) {
+    if ('preset' in values && presets[values['preset']]) {
+      device.setPreset(presets[values['preset']].preset);
+      // the preset overwrites the parameters set from the controller
+      setParams(user.getValues());
+    }
+    if ('style' in values) sendMessageToInport(device, 'style', values['style']);
+    if ('mod' in values) sendMessageToInport(device, 'mod', [values['mod']]);
+    if ('fade' in values) sendMessageToInport(device, 'fade', [values['fade']]);
+    if ('volume' in values) volumeGain.gain.setTargetAtTime(values['volume'], audioContext.currentTime, 0.02);
+    setParams(values);
   }
 
   user.onUpdate(updates => {
@@ -846,7 +860,13 @@ async function main($container) {
   // created RNBO device: user.onUpdate only fires on changes, existing state is
   // silent on reconnect.
   applyPhase(global.get('phase'));
-  applySound(user.getValues());
+  // The preset and parameters, then whatever the controller changed from the
+  // defaults (left out, the patch keeps its own values for the messages).
+  const defaults = user.getDefaults();
+  const changed = Object.fromEntries(Object.entries(user.getValues())
+    .filter(([key, value]) => JSON.stringify(value) !== JSON.stringify(defaults[key])));
+  applySound({ preset: user.get('preset'), volume: user.get('volume'), ...changed });
+  setParams(user.getValues());
   applySyncResult(global.get('sync'), false);
 }
 
@@ -1001,7 +1021,7 @@ function setupUI(device, control, audioContext, padGain, global, returning, pad)
         const touchX = Math.round((dotX / padSize) * 100);
         const touchY = Math.round((dotY / padSize) * 100);
         device._lastTouch = [touchX, touchY];
-        sendMessageToInport(device, 'touch', [touchX, touchY, global.get('slider')]);
+        sendMessageToInport(device, 'touch', [touchX, touchY]);
     }
 
     function release(e) {
@@ -1011,6 +1031,7 @@ function setupUI(device, control, audioContext, padGain, global, returning, pad)
         padGain.gain.cancelScheduledValues(audioContext.currentTime);
         padGain.gain.setValueAtTime(padGain.gain.value, audioContext.currentTime);
         padGain.gain.linearRampToValueAtTime(0.25, audioContext.currentTime + 0.2);
+        sendMessageToInport(device, 'start', [0]);
         updateControlActive(false);
     }
 
@@ -1028,6 +1049,10 @@ function setupUI(device, control, audioContext, padGain, global, returning, pad)
         padGain.gain.setValueAtTime(padGain.gain.value, audioContext.currentTime);
         padGain.gain.linearRampToValueAtTime(1, audioContext.currentTime + 0.2);
         sendTouch();
+        // as in NINA_B3-H4RSH: the patch plays while touched, and each new touch
+        // triggers it
+        sendMessageToInport(device, 'start', [1]);
+        sendMessageToInport(device, 'trigger', [1]);
         updateControlActive(true);
     });
 

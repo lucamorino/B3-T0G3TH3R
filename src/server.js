@@ -42,10 +42,47 @@ const CAPACITY = 50;
 server.stateManager.defineClass('global', globalSchema);
 server.stateManager.defineClass('user', userSchema);
 server.stateManager.defineClass('control', controlSchema);
+// Audio routing between phones (WebRTC), edited in the controller's matrix:
+// connections: Array<{ from: index, to: index }>, the sound of player `from` sent
+// to the RNBO input of player `to`.
+server.stateManager.defineClass('routing', {
+  connections: { type: 'any', default: [] },
+});
 
 await server.start();
 
 const global = await server.stateManager.create('global');
+await server.stateManager.create('routing');
+
+// ---------------------------------------------------------------------------
+// WebRTC signaling
+//
+// Phones send their sound to each other peer to peer (see the player); the
+// server only relays the offers, answers and ICE candidates between them, by
+// player index. A player keeps its index when its page reloads (see the player
+// registry below), so its peers may still hold connections to the page that is
+// gone: when a player registers, every other one is told to drop them and
+// connect again.
+// ---------------------------------------------------------------------------
+const rtcClients = new Map(); // player index -> soundworks client
+
+server.onClientConnect((client) => {
+  client.socket.addListener('webrtc:register', (playerIndex) => {
+    rtcClients.set(playerIndex, client);
+    for (const other of rtcClients.values()) {
+      if (other !== client) other.socket.send('webrtc:peer-joined', playerIndex);
+    }
+  });
+  client.socket.addListener('webrtc:signal', ({ to, payload }) => {
+    rtcClients.get(to)?.socket.send('webrtc:signal', payload);
+  });
+});
+
+server.onClientDisconnect((client) => {
+  for (const [index, other] of rtcClients) {
+    if (other === client) rtcClients.delete(index);
+  }
+});
 const sync = await server.pluginManager.get('sync');
 
 // Players seen since the server started, see the player registry below.

@@ -7,8 +7,9 @@ export default {
       min: 0,
       max: 128,
     },
-    // Sound of the player's instrument, set from the controller and forwarded to
-    // the RNBO device.
+    // Sound of the player's instrument (the B3-H4RSH NINA RNBO patch), set from
+    // the controller. `volume` is the level of the instrument on the phone's
+    // speaker; the other parameters are forwarded to the RNBO device.
     volume: {
       type: 'float',
       default: 1,
@@ -31,6 +32,26 @@ export default {
       min: 0.001,
       max: 3.99,
     },
+    bp_q: {
+      type: 'float',
+      default: 0.6,
+      min: 0.001,
+      max: 0.99,
+    },
+    phase_q: {
+      type: 'float',
+      default: 0.6,
+      min: 0.001,
+      max: 0.99,
+    },
+    // Index of one of the RNBO patch's presets; parameters set from the controller
+    // (fb_gain, fb_trim, bp_q, phase_q) are applied again on top of it.
+    preset: {
+      type: 'integer',
+      default: 0,
+      min: 0,
+      max: 15,
+    },
     fade: {
       type: 'float',
       default: 200,
@@ -42,14 +63,6 @@ export default {
       default: 0.5,
       min: 0,
       max: 1,
-    },
-    env: {
-      type: 'any',
-      default: [30, 70],
-    },
-    LFO: {
-      type: 'any',
-      default: [0, 2.5, 0.2],
     },
     // Values above `max` are silently clamped.
     local_score: {
@@ -83,6 +96,12 @@ export default {
     full: {
       type: 'boolean',
       default: false,
+    },
+    // Players this phone currently sends its sound to over WebRTC (connection
+    // established, not only requested in the routing matrix), set by the phone.
+    connectedTo: {
+      type: 'any',
+      default: [],
     },
     // 'opus' or 'mp3': which encoding of the samples this phone loaded.
     audioFormat: {
