@@ -1199,3 +1199,55 @@ body.controller-client {
     margin-left: 8px;
   }
 }
+
+/* ---------- Controller: target ---------- */
+
+// a wide table scrolls instead of widening the column
+.controller-left {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.target-table-scroll {
+  overflow-x: auto;
+}
+
+.target-picker {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+
+  .phase-button {
+    flex: 0 0 auto;
+    padding: 6px 10px;
+  }
+
+  .param-number {
+    width: 56px;
+    flex: 0 0 auto;
+  }
+}
+
+.target-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 10px;
+  font-variant-numeric: tabular-nums;
+
+  th,
+  td {
+    padding: 3px 4px;
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    text-align: right;
+  }
+
+  th:first-child,
+  td:first-child {
+    text-align: left;
+    white-space: nowrap;
+  }
+
+  th {
+    font-weight: 400;
+    color: var(--sw-light-font-color);
+  }
+}

@@ -1,8 +1,10 @@
 # `B3-T0G3TH3R`
 
 An audience participation game piece: every spectator plays a sound instrument on
-their phone, and scores points by moving in synchronisation with other players,
-on a pulse shared by every device.
+their phone, the phones' sounds feed into each other, and players score points by
+bringing their interdependent sounds, together, to a target configuration of sound
+descriptors shown on the display. Their synchronisation, on a pulse shared by
+every device, is evaluated along the way.
 
 The project is built with **soundworks** and **RNBO**. Its architecture follows
 `B3-H4RSH` (browser clients only, the game is run from a browser `controller`),
@@ -16,26 +18,76 @@ Live client and no voice scenes.
 
 | Role         | Path          | What it is |
 | ------------ | ------------- | ---------- |
-| `player`     | `/`           | The phone instrument: XY pad driving the RNBO patch, tilt sensors, visual pulse, oscilloscope, sync index, timer and points, nickname. |
-| `display`    | `/display`    | The projected screen: pulse, player cards (sync index, lit while synchronised), radar of every player's sound analysis, group sync, timer, scores ranking. |
-| `controller` | `/controller` | The operator panel: game phase, round length, metronome, synchronisation settings, audio sharing matrix, and the sound parameters of every player or of each one. |
+| `player`     | `/`           | The phone instrument: XY pad driving the RNBO patch, tilt sensors, visual pulse, oscilloscope, closeness to the target, sync index, timer and points, nickname. |
+| `display`    | `/display`    | The projected screen: pulse, player cards (closeness to the target, lit while matching it), radar of the target and of every player's sound descriptors (together or split), group sync, timer, scores ranking. |
+| `controller` | `/controller` | The operator panel: game phase, round length, target, metronome, synchronisation settings, audio sharing matrix, and the sound parameters of every player or of each one. |
 
 ## How the game works
 
 The controller moves the game through four phases (`phase` in `src/global/global.js`):
 
 - **waiting**: players read the instructions while a hum plays; the display shows how to join.
-- **playing**: the metronome runs and the pad is live (see below). Synchronised
-  phones flash in the player's colour on the pulses and score points; the global
-  score is the sum of every player's points. With a round length set, the server
-  moves on to the scores when the time runs out.
+- **playing**: the metronome runs and the pad is live. Players whose sound matches
+  the target (see below) flash in their colour on the pulses and score points; the
+  global score is the sum of every player's points. With a round length set, the
+  server moves on to the scores when the time runs out.
 - **scores**: phones show the global and their own points, the display the ranking.
 - **end**: game over.
 
+## Targets and scoring
+
+Each phone analyses its sound on five descriptors: sharpness, loudness, spectral
+centroid, dissonance and spectral complexity (`src/lib/descriptors.js`, which also
+sets the range each one is drawn and compared on). A **target** is a configuration
+of these five values; players score while their sound matches it. As the phones'
+sounds feed into each other (see Audio sharing), a player cannot reach it alone:
+the routed players have to adapt their sounds to each other.
+
+**The database.** The targets are read from `data/targets.json` when the server
+starts (`TARGETS=path/to/file.json npm run start` for another one):
+
+```json
+{
+  "descriptors": ["sharpness", "loudness", "spectralCentroid", "dissonance", "spectralComplexity"],
+  "targets": [
+    { "id": 0, "name": "T01", "configs": [{ "sharpness": 1.26, "loudness": 78, "spectralCentroid": 765, "dissonance": 0.06, "spectralComplexity": 22.3 }] },
+    { "id": 5, "name": "T06 (complementary)", "configs": [{ "...": "..." }, { "...": "..." }] }
+  ]
+}
+```
+
+A target has one configuration, shared by every player, or several,
+complementary ones: the connected players, in index order, take them in turn (with
+two configurations and two players, each has their own). The current database is
+random, made by `node tools/generate-targets.js [count] [file]`, which draws each
+value in the range most sounds of the RNBO patch fall in (measured across its
+presets and the whole pad).
+
+**Matching.** In the controller, the operator picks the target (by number, previous
+/ next, or at random). About ten times a second the server compares each player's
+descriptors with their configuration, each normalised to its range: a player's
+**closeness** is 1 minus the distance of their farthest descriptor, and a player
+who touches the pad matches the target when their closeness reaches
+1 − `matchTolerance` (0.1 by default, i.e. every descriptor within 10% of its
+range). A matching player flashes and scores 1 point per second.
+
+**The radar** on the display shows the target (dashed white) and every player's
+descriptors (in their colour) on the same chart, so players see their sounds move
+towards it. It has two views, switched in the controller:
+
+- **together**: every player on the same five axes; a complementary target shows
+  each of its configurations (T1, T2…);
+- **split**: one slice of five axes per player, the descriptors in reverse order on
+  every other slice, so that with two players the halves mirror each other. The
+  target is one outline around all slices, each showing the configuration of that
+  slice's player: symmetric when the players share the same configuration,
+  asymmetric when theirs are complementary.
+
 ## Synchronisation
 
-The game evaluates the sensory-motor synchronisation of the players, on three
-layers:
+Along the way, the game evaluates the sensory-motor synchronisation of the
+players (it is shown on the phones, the display and the controller, and does not
+score), on three layers:
 
 1. **touch**: the movement of the finger on the pad (x, y);
 2. **tilt**: the tilt of the phone (gravity along its x and y axes, from the
@@ -69,9 +121,8 @@ the server evaluates it:
 - A pair's index is the weighted mean of the layers both players are active in
   (weights `weightTouch`, `weightTilt`, `weightSound`; 0 leaves a layer out).
 - A player's index is their best pair's. Players at or above `syncThreshold`
-  (0.4 by default, from the paper) are synchronised: they flash during the next
-  bar and score their index for every second of the bar (up to 1 point per second).
-  The group index is the mean over all pairs.
+  (0.4 by default, from the paper) count as synchronised. The group index is the
+  mean over all pairs.
 
 The algorithm is in `src/lib/sync-index.js`, the scheduling in `src/server.js`.
 
@@ -132,7 +183,7 @@ tilt layer.
 
 ```
 src/
-├─ server.js              plugins, phases and round timer, metronome, bar evaluation, WebRTC signaling, player registry, global score
+├─ server.js              plugins, phases and round timer, targets and matching, metronome, bar evaluation, WebRTC signaling, player registry, global score
 ├─ global/global.js       `global` state: phase, round, metronome, synchronisation settings and results, scores
 ├─ clients/
 │  ├─ user.js             `user` state (one per player): identity, score, sound parameters, established audio routes
@@ -144,6 +195,7 @@ src/
 │  └─ palette.js          player colours, shared by every client
 ├─ lib/
 │  ├─ metronome.js        shared pulse grid
+│  ├─ descriptors.js      sound descriptors and their ranges
 │  ├─ sync-index.js       synchronisation index (CPR and phase lock)
 │  ├─ audio-sharing.js    WebRTC audio routes between phones
 │  └─ ...                 audio helpers (sample loading, Opus support, hum loop)
@@ -153,6 +205,11 @@ public/assets/
 ├─ rnbo/1.4.2/            RNBO runtime, served locally
 ├─ essentia/              Essentia.js (WASM) for the spectral analysis
 └─ samples/               hum (.wav and Opus .webm, see tools/encode-audio.sh)
+data/
+└─ targets.json           target database (random for now)
+tools/
+├─ generate-targets.js    random target database
+└─ encode-audio.sh        Opus versions of the samples
 ```
 
 ## Running

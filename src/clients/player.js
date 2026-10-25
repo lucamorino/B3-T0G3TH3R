@@ -14,6 +14,7 @@ import { playerColor } from './palette.js';
 import { getDeviceId, waitForAssignment, openNicknameScreen, showGameFull } from './identity.js';
 import { canDecodeOpus } from '../lib/audio-format.js';
 import { metronomeGrid, gridPosition, samplesPerBar, SAMPLE_RATE } from '../lib/metronome.js';
+import { DESCRIPTORS, normalise } from '../lib/descriptors.js';
 import setupAudioSharing from '../lib/audio-sharing.js';
 
 import pluginPlatformInit from '@soundworks/plugin-platform-init/client.js';
@@ -284,16 +285,9 @@ async function main($container) {
     return smoothed[key];
   }
 
-  // The radar shows the features heavily smoothed. The synchronisation looks at how
-  // they evolve within a bar, so the bar recorder samples them only lightly
-  // smoothed, normalised with the ranges of the display's radar.
-  const SOUND_FEATURES = [
-    { key: 'sharpness',          max: 3 },
-    { key: 'loudness',           max: 120 },
-    { key: 'spectralCentroid',   max: 3000 },
-    { key: 'dissonance',         max: 1 },
-    { key: 'spectralComplexity', max: 100 },
-  ];
+  // The radar and the matching use the features heavily smoothed. The
+  // synchronisation looks at how they evolve within a bar, so the bar recorder
+  // samples them only lightly smoothed, normalised to the descriptors' ranges.
   const soundNow = { sharpness: 0, loudness: 0, spectralCentroid: 0, dissonance: 0, spectralComplexity: 0 };
   function trackSound(key, value) {
     if (Number.isFinite(value)) soundNow[key] = 0.5 * value + 0.5 * soundNow[key];
@@ -365,14 +359,17 @@ async function main($container) {
   sendMessageToInport(device, 'goal', global.get('goal'));
 
   let localScore = user.get('local_score'); // restored when rejoining
-  let isMatched = false; // synchronised in the last bar
-  let mySync = null; // this player's result in the last bar, see applySyncResult()
+  let isMatched = false; // matching the target
+  let myMatch = null; // { config, closeness, matched }, see global `targetMatch`
+  let matchGraceTimeout = null;
+  let scoreInterval = null;
+  let mySync = null; // this player's synchronisation in the last bar
   let timerDisplay = '--:--';
   let timerInterval = null;
   let interfaceHidden = false; // mirrors renderApp()'s hideInterface
 
   // Full-screen layer behind the app (#background-layer in app.scss), flashing in
-  // the player's colour on the pulses while synchronised. Only its opacity changes
+  // the player's colour on the pulses while matching the target. Only its opacity changes
   // from frame to frame, and it sits on its own compositor layer, so that does not
   // repaint the page. Prepended to <body>: outside the part of it that lit renders
   // the app into.
@@ -401,24 +398,62 @@ async function main($container) {
   }
 
   // Each bar, the server tells every player how synchronised they were (see
-  // server.js). A synchronised player scores their index for every second of the
-  // bar, i.e. up to 1 point per second.
-  function applySyncResult(result, score = true) {
+  // server.js): shown, it does not score.
+  function applySyncResult(result) {
     mySync = result?.players?.[index] ?? null;
-    isMatched = mySync !== null
-      && mySync.partner !== null
-      && mySync.index >= global.get('syncThreshold');
-    if (isMatched && score) {
-      localScore += mySync.index * result.duration;
-      user.set({ local_score: localScore });
-    }
-    if (!isMatched) hideBackground();
     renderApp();
   }
 
+  // While the player matches the target (see server.js), the score counts locally
+  // at 10Hz, 1 point per second, and is published twice a second: it is only ever
+  // shown rounded to whole points. The exact value is published whenever the
+  // counter stops.
+  const SCORE_PUBLISH_EVERY = 5; // ticks
+
+  function startScoreCounter() {
+    if (scoreInterval) return;
+    let ticks = 0;
+    scoreInterval = setInterval(() => {
+      localScore += 0.1;
+      if (++ticks % SCORE_PUBLISH_EVERY === 0) user.set({ local_score: localScore });
+      renderApp();
+    }, 100);
+  }
+
+  function stopScoreCounter() {
+    if (scoreInterval) {
+      clearInterval(scoreInterval);
+      scoreInterval = null;
+      user.set({ local_score: localScore });
+    }
+  }
+
+  function applyMatched(raw) {
+    const matchedIds = Array.isArray(raw?.[0]) ? raw[0] : [];
+    if (matchedIds.includes(index)) {
+      if (matchGraceTimeout) { clearTimeout(matchGraceTimeout); matchGraceTimeout = null; }
+      if (!isMatched) {
+        isMatched = true;
+        startScoreCounter();
+      }
+    } else if (isMatched && !matchGraceTimeout) {
+      // a short grace, so a single missed evaluation does not break the match
+      matchGraceTimeout = setTimeout(() => {
+        matchGraceTimeout = null;
+        isMatched = false;
+        stopScoreCounter();
+        hideBackground();
+        renderApp();
+      }, 300);
+    }
+  }
+
   function resetSync() {
+    if (matchGraceTimeout) { clearTimeout(matchGraceTimeout); matchGraceTimeout = null; }
     isMatched = false;
+    myMatch = null;
     mySync = null;
+    stopScoreCounter();
     hideBackground();
   }
 
@@ -500,6 +535,16 @@ async function main($container) {
     }
     if ('sync' in updates) {
       applySyncResult(updates['sync']);
+    }
+    if ('targetMatch' in updates) {
+      const next = updates['targetMatch']?.[index] ?? null;
+      if (JSON.stringify(next) !== JSON.stringify(myMatch)) {
+        myMatch = next;
+        renderApp();
+      }
+    }
+    if ('matched' in updates) {
+      applyMatched(updates['matched']);
     }
     if ('pulsesPerBar' in updates) {
       renderApp(); // pulse strip
@@ -683,7 +728,7 @@ async function main($container) {
     const slot = Math.min(recording.n - 1, Math.floor(position.barTime * SAMPLE_RATE));
     recording.touch[slot] = [pad.x, pad.y];
     recording.tilt[slot] = performance.now() - tilt.time < MOTION_TIMEOUT ? [tilt.x, tilt.y] : null;
-    recording.sound[slot] = SOUND_FEATURES.map(({ key, max }) => Math.max(0, Math.min(1, soundNow[key] / max)));
+    recording.sound[slot] = DESCRIPTORS.map(d => normalise(d, soundNow[d.key]));
     recording.active[slot] = pad.active;
   }
 
@@ -809,7 +854,7 @@ async function main($container) {
           </div>
         </div>
 
-        <!-- Info row: player colour + timer + global pts + my pts -->
+        <!-- Info row: player colour + timer + target closeness + sync + global pts + my pts -->
         <div id="info-row" style="display: ${hideInterface ? 'none' : 'flex'};">
           <div id="player-color-dot" style="background: ${myColor.stroke};"></div>
           <div class="score-item">
@@ -817,8 +862,12 @@ async function main($container) {
             <span class="score-value">${timerDisplay}</span>
           </div>
           <div class="score-item">
+            <span class="score-label">Target</span>
+            <span class="score-value ${isMatched ? 'synchronised' : ''}">${myMatch ? `${Math.round(myMatch.closeness * 100)}%` : '--'}</span>
+          </div>
+          <div class="score-item">
             <span class="score-label">Sync</span>
-            <span class="score-value ${isMatched ? 'synchronised' : ''}">${mySync && mySync.partner !== null ? `${Math.round(mySync.index * 100)}%` : '--'}</span>
+            <span class="score-value">${mySync && mySync.partner !== null ? `${Math.round(mySync.index * 100)}%` : '--'}</span>
           </div>
           <div class="score-item">
             <span class="score-label">Global</span>
@@ -867,7 +916,7 @@ async function main($container) {
     .filter(([key, value]) => JSON.stringify(value) !== JSON.stringify(defaults[key])));
   applySound({ preset: user.get('preset'), volume: user.get('volume'), ...changed });
   setParams(user.getValues());
-  applySyncResult(global.get('sync'), false);
+  applySyncResult(global.get('sync'));
 }
 
 function waitUntilVisible() {
@@ -1077,9 +1126,9 @@ function setupUI(device, control, audioContext, padGain, global, returning, pad)
         'How to play:',
         'Tap and hold the pad to generate the sound.',
         'Drag around to shape the sound.',
-        'Follow the pulse and move with the other players:',
-        'on the pad, tilting your phone, with your sound.',
-        'The more in sync you are, the more points you collect.',
+        'Your sound reaches the other players, theirs reaches you.',
+        'Together, bring your sounds to the target on the screen.',
+        'While your sound matches it, you collect points.',
       ],
       [
         'Turn up the volume on your device.',

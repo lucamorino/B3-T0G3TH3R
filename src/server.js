@@ -3,11 +3,14 @@ import '@soundworks/helpers/catch-unhandled-errors.js';
 import { Server } from '@soundworks/core/server.js';
 import { loadConfig, configureHttpRouter } from '@soundworks/helpers/server.js';
 
+import fs from 'node:fs';
+
 import pluginPlatformInit from '@soundworks/plugin-platform-init/server.js';
 import pluginSync from '@soundworks/plugin-sync/server.js';
 
 import { metronomeGrid, barStart, SAMPLE_RATE } from './lib/metronome.js';
 import { evaluateBar } from './lib/sync-index.js';
+import { DESCRIPTORS, normalise, normaliseConfig } from './lib/descriptors.js';
 
 import globalSchema from './global/global.js';
 import userSchema from './clients/user.js';
@@ -91,6 +94,41 @@ const devices = new Map(); // deviceId -> { index, nickname, score, state, lastS
 let scoreDirty = false;
 
 // ---------------------------------------------------------------------------
+// Targets
+//
+// The database of targets, descriptor configurations players have to reach, is
+// read from data/targets.json at startup (TARGETS=path/to/file.json to use
+// another one; tools/generate-targets.js makes a random one). The controller
+// picks the current one by its index.
+// ---------------------------------------------------------------------------
+const TARGETS_FILE = process.env.TARGETS || 'data/targets.json';
+
+function loadTargets() {
+  try {
+    const { targets } = JSON.parse(fs.readFileSync(TARGETS_FILE, 'utf8'));
+    const valid = targets.filter(t => Array.isArray(t.configs) && t.configs.length > 0);
+    console.log(`[targets] ${valid.length} targets loaded from ${TARGETS_FILE}`);
+    return valid;
+  } catch (err) {
+    console.error(`[targets] could not read ${TARGETS_FILE}:`, err.message);
+    return [];
+  }
+}
+
+const targets = loadTargets();
+// Last match result sent, see evaluateTarget() below.
+let lastTargetMatch = '';
+
+function selectTarget(index) {
+  const target = targets[Math.min(index, targets.length - 1)] ?? null;
+  global.set({ target });
+  if (target) console.log(`[targets] target ${target.name}`);
+}
+
+global.set({ targetCount: targets.length });
+selectTarget(global.get('targetIndex'));
+
+// ---------------------------------------------------------------------------
 // Phases and round timer
 //
 // Every phase change is stamped with the sync time it happened at, so players and
@@ -122,7 +160,8 @@ global.onUpdate(async updates => {
     if (updates.phase === 'playing') {
       startMetronome();
     } else {
-      global.set({ metronomeOrigin: 0, sync: null, matched: [[]] });
+      lastTargetMatch = '';
+      global.set({ metronomeOrigin: 0, sync: null, matched: [[]], targetMatch: {} });
     }
     scheduleRoundEnd();
   }
@@ -131,6 +170,9 @@ global.onUpdate(async updates => {
   }
   if ('pulsePeriod' in updates || 'pulsesPerBar' in updates) {
     moveMetronome();
+  }
+  if ('targetIndex' in updates) {
+    selectTarget(updates.targetIndex);
   }
   if ('metronomeOrigin' in updates) {
     grid = metronomeGrid(global);
@@ -177,7 +219,7 @@ function moveMetronome() {
 // after the end of each bar, the server evaluates the bar from the reports it got
 // (see src/lib/sync-index.js): every player gets a synchronisation index, their
 // best with another player, and the players whose index reaches `syncThreshold`
-// are synchronised. Phones score points from the result.
+// are synchronised. Synchronisation is shown, it does not score.
 // ---------------------------------------------------------------------------
 // Time after the end of a bar the server waits for the phones' reports.
 const REPORT_GRACE = 0.5;
@@ -211,23 +253,22 @@ function evaluate(bar) {
 
   const threshold = global.get('syncThreshold');
   const players = {};
-  const matched = [];
+  const synchronised = [];
   for (const [id, { index, partner, layers: pairLayers }] of Object.entries(result.players)) {
     const roundedLayers = {};
     for (const [name, value] of Object.entries(pairLayers)) {
       roundedLayers[name] = value === null ? null : round3(value);
     }
     players[id] = { index: round3(index), partner, layers: roundedLayers };
-    if (partner !== null && index >= threshold) matched.push(Number(id));
+    if (partner !== null && index >= threshold) synchronised.push(Number(id));
   }
 
   global.set({
-    sync: { bar, origin: grid.origin, duration: grid.bar, group: round3(result.group), players },
-    matched: [matched],
+    sync: { bar, origin: grid.origin, duration: grid.bar, group: round3(result.group), synchronised, players },
   });
 
   if (barReports.size > 0) {
-    console.log(`[sync] bar ${bar}: ${barReports.size} reports, group ${result.group.toFixed(2)}, synchronised: ${matched.join(', ') || '-'}`);
+    console.log(`[sync] bar ${bar}: ${barReports.size} reports, group ${result.group.toFixed(2)}, synchronised: ${synchronised.join(', ') || '-'}`);
   }
 }
 
@@ -262,6 +303,48 @@ controlCollection.onDetach((state) => {
   controlStates.delete(state.id);
   global.set({ numPlayers: controlStates.size });
 });
+
+// ---------------------------------------------------------------------------
+// Matching the target
+//
+// About 10 times a second, every player's sound (the descriptors the phone
+// publishes, see control.js) is compared with their configuration of the
+// target: the connected players, in index order, take the target's
+// configurations in turn. A player who touches the pad and whose every
+// descriptor is within `matchTolerance` of the target (normalised to the
+// descriptor's range) matches it, and scores 1 point per second on their phone.
+// ---------------------------------------------------------------------------
+const MATCH_INTERVAL = 100;
+
+function evaluateTarget() {
+  const target = global.get('target');
+  if (global.get('phase') !== 'playing' || !target) return;
+
+  const configs = target.configs.map(normaliseConfig);
+  const tolerance = global.get('matchTolerance');
+  const states = Array.from(controlStates.values()).sort((a, b) => a.get('id') - b.get('id'));
+
+  const targetMatch = {};
+  const matched = [];
+  states.forEach((state, rank) => {
+    const config = rank % configs.length;
+    const distances = DESCRIPTORS.map((d, i) => Math.abs(normalise(d, state.get(d.key)) - configs[config][i]));
+    // the farthest descriptor decides: matching when closeness >= 1 - tolerance
+    const closeness = 1 - Math.max(...distances);
+    const isMatched = state.get('active') > 0 && closeness >= 1 - tolerance;
+    const id = state.get('id');
+    targetMatch[id] = { config, closeness: Math.round(closeness * 100) / 100, matched: isMatched };
+    if (isMatched) matched.push(id);
+  });
+
+  // only send changes: every client receives the global state
+  const serialised = JSON.stringify(targetMatch);
+  if (serialised === lastTargetMatch) return;
+  lastTargetMatch = serialised;
+  global.set({ targetMatch, matched: [matched] });
+}
+
+setInterval(evaluateTarget, MATCH_INTERVAL);
 
 // ---------------------------------------------------------------------------
 // Player registry

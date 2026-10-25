@@ -88,7 +88,7 @@ export default {
     min: 0.05,
     max: 2,
   },
-  // Index from which players count as synchronised: they light up and score.
+  // Index from which players count as synchronised (shown, no points).
   // 0.4 is the value from which synchronisation is considered remarkable in
   // Varni et al. (2012).
   syncThreshold: {
@@ -98,17 +98,63 @@ export default {
     max: 1,
   },
   // Result of the last evaluated bar, set by the server:
-  // { bar, origin, duration, group, players: { [id]: { index, partner, layers } } }
+  // { bar, origin, duration, group, synchronised: [...indexes],
+  //   players: { [id]: { index, partner, layers } } }
   sync: {
     type: 'any',
     default: null,
     nullable: true,
   },
-  // Indexes of the players synchronised in the last bar, as [[...indexes]], set by
-  // the server.
+  // ---- Targets (see src/lib/descriptors.js and data/targets.json) ----
+  // Index, in the target database, of the target players have to reach.
+  targetIndex: {
+    type: 'integer',
+    default: 0,
+    min: 0,
+    max: 100000,
+  },
+  // Number of targets in the database, set by the server.
+  targetCount: {
+    type: 'integer',
+    default: 0,
+    min: 0,
+    max: 100000,
+  },
+  // The current target, set by the server from `targetIndex`:
+  // { id, name, configs: [{ [descriptor]: value }, ...] }. With several
+  // configurations, the players (in index order) take them in turn.
+  target: {
+    type: 'any',
+    default: null,
+    nullable: true,
+  },
+  // Largest distance, on every descriptor (normalised to its range, 0..1),
+  // between a player's sound and its target for the player to match it.
+  matchTolerance: {
+    type: 'float',
+    default: 0.1,
+    min: 0.01,
+    max: 0.5,
+  },
+  // How close each player is to their target, set by the server about 10 times a
+  // second: { [id]: { config, closeness, matched } }, `config` being the index of
+  // the player's configuration in the target and `closeness` 1 minus the
+  // normalised distance of the descriptor farthest from it (a player matches
+  // when closeness >= 1 - matchTolerance).
+  targetMatch: {
+    type: 'any',
+    default: {},
+  },
+  // Indexes of the players matching their target, as [[...indexes]], set by the
+  // server. Matching players score 1 point per second.
   matched: {
     type: 'any',
     default: [[]],
+  },
+  // Display: one slice of the radar per player instead of all on the same axes.
+  radarSplit: {
+    type: 'boolean',
+    default: false,
   },
   // Sum of every player's score, maintained by the server. Values above `max` are
   // silently clamped, and many players pass 1000 quickly, hence the generous ceiling.

@@ -1,0 +1,622 @@
+{
+  "descriptors": [
+    "sharpness",
+    "loudness",
+    "spectralCentroid",
+    "dissonance",
+    "spectralComplexity"
+  ],
+  "targets": [
+    {
+      "id": 0,
+      "name": "T01",
+      "configs": [
+        {
+          "sharpness": 1.26,
+          "loudness": 78,
+          "spectralCentroid": 765,
+          "dissonance": 0.0595,
+          "spectralComplexity": 22.3
+        }
+      ]
+    },
+    {
+      "id": 1,
+      "name": "T02",
+      "configs": [
+        {
+          "sharpness": 1.24,
+          "loudness": 67.2,
+          "spectralCentroid": 1483,
+          "dissonance": 0.397,
+          "spectralComplexity": 22.7
+        }
+      ]
+    },
+    {
+      "id": 2,
+      "name": "T03",
+      "configs": [
+        {
+          "sharpness": 1.04,
+          "loudness": 77,
+          "spectralCentroid": 1654,
+          "dissonance": 0.108,
+          "spectralComplexity": 18.4
+        }
+      ]
+    },
+    {
+      "id": 3,
+      "name": "T04",
+      "configs": [
+        {
+          "sharpness": 1.1,
+          "loudness": 49.3,
+          "spectralCentroid": 1277,
+          "dissonance": 0.382,
+          "spectralComplexity": 14
+        }
+      ]
+    },
+    {
+      "id": 4,
+      "name": "T05",
+      "configs": [
+        {
+          "sharpness": 1.57,
+          "loudness": 66.9,
+          "spectralCentroid": 1297,
+          "dissonance": 0.333,
+          "spectralComplexity": 29.6
+        }
+      ]
+    },
+    {
+      "id": 5,
+      "name": "T06 (complementary)",
+      "configs": [
+        {
+          "sharpness": 1.63,
+          "loudness": 67.1,
+          "spectralCentroid": 827,
+          "dissonance": 0.158,
+          "spectralComplexity": 31.1
+        },
+        {
+          "sharpness": 1.54,
+          "loudness": 74.2,
+          "spectralCentroid": 611,
+          "dissonance": 0.269,
+          "spectralComplexity": 17.7
+        }
+      ]
+    },
+    {
+      "id": 6,
+      "name": "T07",
+      "configs": [
+        {
+          "sharpness": 1.37,
+          "loudness": 49.5,
+          "spectralCentroid": 727,
+          "dissonance": 0.0397,
+          "spectralComplexity": 6.71
+        }
+      ]
+    },
+    {
+      "id": 7,
+      "name": "T08",
+      "configs": [
+        {
+          "sharpness": 1.71,
+          "loudness": 48.3,
+          "spectralCentroid": 2047,
+          "dissonance": 0.252,
+          "spectralComplexity": 13.5
+        }
+      ]
+    },
+    {
+      "id": 8,
+      "name": "T09 (complementary)",
+      "configs": [
+        {
+          "sharpness": 1.08,
+          "loudness": 47.2,
+          "spectralCentroid": 1201,
+          "dissonance": 0.0596,
+          "spectralComplexity": 37.1
+        },
+        {
+          "sharpness": 1.05,
+          "loudness": 55.8,
+          "spectralCentroid": 1698,
+          "dissonance": 0.269,
+          "spectralComplexity": 13.1
+        }
+      ]
+    },
+    {
+      "id": 9,
+      "name": "T10 (complementary)",
+      "configs": [
+        {
+          "sharpness": 1.5,
+          "loudness": 79.2,
+          "spectralCentroid": 630,
+          "dissonance": 0.399,
+          "spectralComplexity": 7.02
+        },
+        {
+          "sharpness": 1.05,
+          "loudness": 74.9,
+          "spectralCentroid": 1620,
+          "dissonance": 0.175,
+          "spectralComplexity": 36
+        }
+      ]
+    },
+    {
+      "id": 10,
+      "name": "T11",
+      "configs": [
+        {
+          "sharpness": 1.23,
+          "loudness": 69.7,
+          "spectralCentroid": 351,
+          "dissonance": 0.332,
+          "spectralComplexity": 11
+        }
+      ]
+    },
+    {
+      "id": 11,
+      "name": "T12 (complementary)",
+      "configs": [
+        {
+          "sharpness": 1.34,
+          "loudness": 65.5,
+          "spectralCentroid": 887,
+          "dissonance": 0.325,
+          "spectralComplexity": 10.2
+        },
+        {
+          "sharpness": 1.69,
+          "loudness": 78.5,
+          "spectralCentroid": 708,
+          "dissonance": 0.229,
+          "spectralComplexity": 39.8
+        }
+      ]
+    },
+    {
+      "id": 12,
+      "name": "T13",
+      "configs": [
+        {
+          "sharpness": 1.5,
+          "loudness": 78.3,
+          "spectralCentroid": 2300,
+          "dissonance": 0.101,
+          "spectralComplexity": 41.1
+        }
+      ]
+    },
+    {
+      "id": 13,
+      "name": "T14",
+      "configs": [
+        {
+          "sharpness": 1.56,
+          "loudness": 60.5,
+          "spectralCentroid": 1654,
+          "dissonance": 0.0167,
+          "spectralComplexity": 18.4
+        }
+      ]
+    },
+    {
+      "id": 14,
+      "name": "T15 (complementary)",
+      "configs": [
+        {
+          "sharpness": 1.01,
+          "loudness": 53.7,
+          "spectralCentroid": 757,
+          "dissonance": 0.0894,
+          "spectralComplexity": 32.6
+        },
+        {
+          "sharpness": 1.56,
+          "loudness": 43.5,
+          "spectralCentroid": 1649,
+          "dissonance": 0.0937,
+          "spectralComplexity": 26.9
+        }
+      ]
+    },
+    {
+      "id": 15,
+      "name": "T16",
+      "configs": [
+        {
+          "sharpness": 1.81,
+          "loudness": 53.2,
+          "spectralCentroid": 1900,
+          "dissonance": 0.416,
+          "spectralComplexity": 35.7
+        }
+      ]
+    },
+    {
+      "id": 16,
+      "name": "T17 (complementary)",
+      "configs": [
+        {
+          "sharpness": 1.71,
+          "loudness": 47.1,
+          "spectralCentroid": 2035,
+          "dissonance": 0.224,
+          "spectralComplexity": 34.8
+        },
+        {
+          "sharpness": 1.52,
+          "loudness": 51.5,
+          "spectralCentroid": 1931,
+          "dissonance": 0.257,
+          "spectralComplexity": 26.8
+        }
+      ]
+    },
+    {
+      "id": 17,
+      "name": "T18 (complementary)",
+      "configs": [
+        {
+          "sharpness": 1.45,
+          "loudness": 71.6,
+          "spectralCentroid": 2293,
+          "dissonance": 0.422,
+          "spectralComplexity": 40.5
+        },
+        {
+          "sharpness": 1.42,
+          "loudness": 74.6,
+          "spectralCentroid": 2164,
+          "dissonance": 0.181,
+          "spectralComplexity": 41.1
+        }
+      ]
+    },
+    {
+      "id": 18,
+      "name": "T19",
+      "configs": [
+        {
+          "sharpness": 1.72,
+          "loudness": 58.8,
+          "spectralCentroid": 783,
+          "dissonance": 0.0969,
+          "spectralComplexity": 18.8
+        }
+      ]
+    },
+    {
+      "id": 19,
+      "name": "T20",
+      "configs": [
+        {
+          "sharpness": 1.61,
+          "loudness": 43.4,
+          "spectralCentroid": 1364,
+          "dissonance": 0.0903,
+          "spectralComplexity": 27.5
+        }
+      ]
+    },
+    {
+      "id": 20,
+      "name": "T21 (complementary)",
+      "configs": [
+        {
+          "sharpness": 1,
+          "loudness": 75.8,
+          "spectralCentroid": 1984,
+          "dissonance": 0.155,
+          "spectralComplexity": 31.6
+        },
+        {
+          "sharpness": 1.37,
+          "loudness": 51,
+          "spectralCentroid": 627,
+          "dissonance": 0.0817,
+          "spectralComplexity": 12.5
+        }
+      ]
+    },
+    {
+      "id": 21,
+      "name": "T22 (complementary)",
+      "configs": [
+        {
+          "sharpness": 1.58,
+          "loudness": 53.8,
+          "spectralCentroid": 2077,
+          "dissonance": 0.407,
+          "spectralComplexity": 18.3
+        },
+        {
+          "sharpness": 1.2,
+          "loudness": 48.3,
+          "spectralCentroid": 1404,
+          "dissonance": 0.166,
+          "spectralComplexity": 21.9
+        }
+      ]
+    },
+    {
+      "id": 22,
+      "name": "T23",
+      "configs": [
+        {
+          "sharpness": 1.66,
+          "loudness": 54.7,
+          "spectralCentroid": 411,
+          "dissonance": 0.376,
+          "spectralComplexity": 34
+        }
+      ]
+    },
+    {
+      "id": 23,
+      "name": "T24",
+      "configs": [
+        {
+          "sharpness": 1.63,
+          "loudness": 54.5,
+          "spectralCentroid": 1063,
+          "dissonance": 0.379,
+          "spectralComplexity": 25.5
+        }
+      ]
+    },
+    {
+      "id": 24,
+      "name": "T25 (complementary)",
+      "configs": [
+        {
+          "sharpness": 1.06,
+          "loudness": 77.1,
+          "spectralCentroid": 1215,
+          "dissonance": 0.42,
+          "spectralComplexity": 28.6
+        },
+        {
+          "sharpness": 1.84,
+          "loudness": 41,
+          "spectralCentroid": 553,
+          "dissonance": 0.237,
+          "spectralComplexity": 41.4
+        }
+      ]
+    },
+    {
+      "id": 25,
+      "name": "T26",
+      "configs": [
+        {
+          "sharpness": 1.45,
+          "loudness": 74.9,
+          "spectralCentroid": 1295,
+          "dissonance": 0.0683,
+          "spectralComplexity": 23
+        }
+      ]
+    },
+    {
+      "id": 26,
+      "name": "T27",
+      "configs": [
+        {
+          "sharpness": 1.21,
+          "loudness": 58.7,
+          "spectralCentroid": 2038,
+          "dissonance": 0.333,
+          "spectralComplexity": 39.4
+        }
+      ]
+    },
+    {
+      "id": 27,
+      "name": "T28",
+      "configs": [
+        {
+          "sharpness": 1.44,
+          "loudness": 61.4,
+          "spectralCentroid": 476,
+          "dissonance": 0.019,
+          "spectralComplexity": 41.5
+        }
+      ]
+    },
+    {
+      "id": 28,
+      "name": "T29",
+      "configs": [
+        {
+          "sharpness": 1.52,
+          "loudness": 44.3,
+          "spectralCentroid": 1131,
+          "dissonance": 0.179,
+          "spectralComplexity": 14.7
+        }
+      ]
+    },
+    {
+      "id": 29,
+      "name": "T30",
+      "configs": [
+        {
+          "sharpness": 1.63,
+          "loudness": 49,
+          "spectralCentroid": 1701,
+          "dissonance": 0.334,
+          "spectralComplexity": 42.3
+        }
+      ]
+    },
+    {
+      "id": 30,
+      "name": "T31",
+      "configs": [
+        {
+          "sharpness": 1.26,
+          "loudness": 64,
+          "spectralCentroid": 1271,
+          "dissonance": 0.0448,
+          "spectralComplexity": 13.7
+        }
+      ]
+    },
+    {
+      "id": 31,
+      "name": "T32",
+      "configs": [
+        {
+          "sharpness": 1.2,
+          "loudness": 58.6,
+          "spectralCentroid": 1003,
+          "dissonance": 0.426,
+          "spectralComplexity": 39.3
+        }
+      ]
+    },
+    {
+      "id": 32,
+      "name": "T33",
+      "configs": [
+        {
+          "sharpness": 1.01,
+          "loudness": 68.6,
+          "spectralCentroid": 1204,
+          "dissonance": 0.419,
+          "spectralComplexity": 10.7
+        }
+      ]
+    },
+    {
+      "id": 33,
+      "name": "T34 (complementary)",
+      "configs": [
+        {
+          "sharpness": 1.58,
+          "loudness": 77.9,
+          "spectralCentroid": 1488,
+          "dissonance": 0.182,
+          "spectralComplexity": 30.1
+        },
+        {
+          "sharpness": 1.77,
+          "loudness": 45.7,
+          "spectralCentroid": 899,
+          "dissonance": 0.146,
+          "spectralComplexity": 39.2
+        }
+      ]
+    },
+    {
+      "id": 34,
+      "name": "T35",
+      "configs": [
+        {
+          "sharpness": 1.68,
+          "loudness": 57.3,
+          "spectralCentroid": 1386,
+          "dissonance": 0.0228,
+          "spectralComplexity": 44.1
+        }
+      ]
+    },
+    {
+      "id": 35,
+      "name": "T36",
+      "configs": [
+        {
+          "sharpness": 1.41,
+          "loudness": 60.1,
+          "spectralCentroid": 374,
+          "dissonance": 0.145,
+          "spectralComplexity": 37
+        }
+      ]
+    },
+    {
+      "id": 36,
+      "name": "T37",
+      "configs": [
+        {
+          "sharpness": 1.77,
+          "loudness": 45.8,
+          "spectralCentroid": 659,
+          "dissonance": 0.0836,
+          "spectralComplexity": 21.6
+        }
+      ]
+    },
+    {
+      "id": 37,
+      "name": "T38 (complementary)",
+      "configs": [
+        {
+          "sharpness": 1.03,
+          "loudness": 55.3,
+          "spectralCentroid": 1522,
+          "dissonance": 0.402,
+          "spectralComplexity": 35.4
+        },
+        {
+          "sharpness": 1.72,
+          "loudness": 55,
+          "spectralCentroid": 2088,
+          "dissonance": 0.322,
+          "spectralComplexity": 43.9
+        }
+      ]
+    },
+    {
+      "id": 38,
+      "name": "T39 (complementary)",
+      "configs": [
+        {
+          "sharpness": 1.55,
+          "loudness": 57,
+          "spectralCentroid": 2113,
+          "dissonance": 0.0368,
+          "spectralComplexity": 27.9
+        },
+        {
+          "sharpness": 1.14,
+          "loudness": 43.9,
+          "spectralCentroid": 2101,
+          "dissonance": 0.119,
+          "spectralComplexity": 37
+        }
+      ]
+    },
+    {
+      "id": 39,
+      "name": "T40",
+      "configs": [
+        {
+          "sharpness": 1.22,
+          "loudness": 63.8,
+          "spectralCentroid": 523,
+          "dissonance": 0.2,
+          "spectralComplexity": 35.2
+        }
+      ]
+    }
+  ]
+}

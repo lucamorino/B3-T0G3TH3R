@@ -5,6 +5,7 @@ import { html, render } from 'lit';
 import '@ircam/sc-components';
 
 import { playerColor } from './palette.js';
+import { DESCRIPTORS } from '../lib/descriptors.js';
 
 // - General documentation: https://soundworks.dev/
 // - API documentation:     https://soundworks.dev/api
@@ -168,6 +169,89 @@ async function main($container) {
   const percent = value => `${Math.round(value * 100)}%`;
 
   // A player's result in the last bar: index and per-layer indexes.
+  // ── Targets ───────────────────────────────────────────────────────────────
+  function selectTarget(index) {
+    const count = global.get('targetCount');
+    if (count === 0) return;
+    global.set({ targetIndex: ((index % count) + count) % count });
+  }
+
+  function formatDescriptor(value) {
+    if (!Number.isFinite(value)) return '--';
+    return Math.abs(value) >= 100 ? value.toFixed(0) : value.toPrecision(3);
+  }
+
+  function targetSection() {
+    const target = global.get('target');
+    const count = global.get('targetCount');
+    return html`
+      <section>
+        <h2>Target</h2>
+        ${count === 0
+          ? html`<p class="empty-state">No target database (see data/targets.json).</p>`
+          : html`
+            <div class="target-picker">
+              <button class="phase-button" type="button" @click="${() => selectTarget(global.get('targetIndex') - 1)}">◀</button>
+              <input
+                class="param-number"
+                type="number"
+                min="1"
+                max="${count}"
+                .value="${String(global.get('targetIndex') + 1)}"
+                @change="${(event) => selectTarget((parseInt(event.target.value, 10) || 1) - 1)}"
+              />
+              <span class="param-value">/ ${count}</span>
+              <button class="phase-button" type="button" @click="${() => selectTarget(global.get('targetIndex') + 1)}">▶</button>
+              <button class="phase-button" type="button" @click="${() => selectTarget(Math.floor(Math.random() * count))}">random</button>
+            </div>
+            ${target ? html`
+              <div class="target-table-scroll">
+              <table class="target-table">
+                <thead>
+                  <tr>
+                    <th>${target.name}</th>
+                    ${DESCRIPTORS.map(d => html`<th title="${d.label}">${d.label.slice(0, 4)}</th>`)}
+                  </tr>
+                </thead>
+                <tbody>
+                  ${target.configs.map((config, k) => html`
+                    <tr>
+                      <td>${target.configs.length > 1 ? `T${k + 1}` : 'all'}</td>
+                      ${DESCRIPTORS.map(d => html`<td>${formatDescriptor(config[d.key])}</td>`)}
+                    </tr>
+                  `)}
+                </tbody>
+              </table>
+              </div>
+            ` : ''}
+          `}
+        ${rangeRow(
+          { label: 'Tolerance', min: 0.01, max: 0.5, step: 0.01, digits: 2 },
+          global.get('matchTolerance'),
+          (value) => global.set({ matchTolerance: value }),
+        )}
+        <label class="toggle-row">
+          <span class="toggle-label">SPLIT RADAR (ONE SLICE PER PLAYER)</span>
+          <input
+            class="toggle-input"
+            type="checkbox"
+            .checked="${global.get('radarSplit')}"
+            @change="${(event) => global.set({ radarSplit: event.target.checked })}"
+          />
+          <span class="toggle-indicator"></span>
+        </label>
+      </section>
+    `;
+  }
+
+  // A player's closeness to their target, as a percentage, and their configuration.
+  function targetSummary(index) {
+    const result = global.get('targetMatch')?.[index];
+    if (!result) return '--';
+    const configs = global.get('target')?.configs.length ?? 1;
+    return `${percent(result.closeness)}${configs > 1 ? ` of T${result.config + 1}` : ''}${result.matched ? ' · matched' : ''}`;
+  }
+
   function syncSummary(index) {
     const result = global.get('sync')?.players?.[index];
     if (!result || result.partner === null) return '--';
@@ -318,6 +402,7 @@ async function main($container) {
                 }}"
               >reset scores</button>
             </section>
+            ${targetSection()}
             <section>
               <h2>Metronome</h2>
               <div class="param-row">
@@ -402,6 +487,7 @@ async function main($container) {
                         #${index} ${state.get('nickname') || `Player ${index}`}
                         <span class="player-score">${formatValue(state.get('local_score'), 0)} pts</span>
                       </div>
+                      <div class="player-sync">target ${targetSummary(index)}</div>
                       <div class="player-sync">sync ${syncSummary(index)}</div>
                       ${soundParamRows(state.getValues(), (updates) => state.set(updates))}
                     </div>
