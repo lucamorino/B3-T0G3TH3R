@@ -23,35 +23,138 @@ export default {
     min: 0,
     max: 3600,
   },
-  // Value sent to the RNBO `start` inport while playing (0 outside of `playing`).
-  start: {
+  goal: {
+    type: 'any',
+    default: [30, 30, 30],
+  },
+  // ---- Shared metronome (see src/lib/metronome.js) ----
+  // Time between two pulses, in milliseconds.
+  pulsePeriod: {
+    type: 'float',
+    default: 500,
+    min: 200,
+    max: 2000,
+  },
+  // Pulses in a bar, the time unit in which synchronisation is evaluated.
+  pulsesPerBar: {
+    type: 'integer',
+    default: 4,
+    min: 1,
+    max: 16,
+  },
+  // Sync time (seconds) of the first pulse of bar 0, set by the server when the
+  // game starts playing and whenever the pulse or the bar changes. 0: no pulse.
+  metronomeOrigin: {
+    type: 'float',
+    default: 0,
+  },
+  // Phones also click on every pulse.
+  click: {
+    type: 'boolean',
+    default: false,
+  },
+  // ---- Synchronisation (see src/lib/sync-index.js) ----
+  // Weight of each layer in a pair's index; 0 leaves the layer out.
+  weightTouch: {
     type: 'float',
     default: 1,
     min: 0,
     max: 1,
   },
-  goal: {
-    type: 'any',
-    default: [30, 30, 30],
-  },
-  // Third value of the RNBO `touch` message, shared by every player.
-  slider: {
+  weightTilt: {
     type: 'float',
-    default: 30,
-    min: 0,
-    max: 100,
-  },
-  // Relative tolerance under which two players' analysis features match.
-  delta: {
-    type: 'float',
-    default: 0.1,
+    default: 1,
     min: 0,
     max: 1,
   },
-  // Indexes of the players currently matched, as [[...indexes]], set by the server.
+  weightSound: {
+    type: 'float',
+    default: 1,
+    min: 0,
+    max: 1,
+  },
+  // Share of the phase lock (acting on the same beat) against the CPR index
+  // (moving with the same rhythm) in each layer's index.
+  phaseWeight: {
+    type: 'float',
+    default: 0.5,
+    min: 0,
+    max: 1,
+  },
+  // Recurrence radius, relative to the spread of each player's signal.
+  tolerance: {
+    type: 'float',
+    default: 0.5,
+    min: 0.05,
+    max: 2,
+  },
+  // Index from which players count as synchronised (shown, no points).
+  // 0.4 is the value from which synchronisation is considered remarkable in
+  // Varni et al. (2012).
+  syncThreshold: {
+    type: 'float',
+    default: 0.4,
+    min: 0,
+    max: 1,
+  },
+  // Result of the last evaluated bar, set by the server:
+  // { bar, origin, duration, group, synchronised: [...indexes],
+  //   players: { [id]: { index, partner, layers } } }
+  sync: {
+    type: 'any',
+    default: null,
+    nullable: true,
+  },
+  // ---- Targets (see src/lib/descriptors.js and data/targets.json) ----
+  // Index, in the target database, of the target players have to reach.
+  targetIndex: {
+    type: 'integer',
+    default: 0,
+    min: 0,
+    max: 100000,
+  },
+  // Number of targets in the database, set by the server.
+  targetCount: {
+    type: 'integer',
+    default: 0,
+    min: 0,
+    max: 100000,
+  },
+  // The current target, set by the server from `targetIndex`:
+  // { id, name, configs: [{ [descriptor]: value }, ...] }. With several
+  // configurations, the players (in index order) take them in turn.
+  target: {
+    type: 'any',
+    default: null,
+    nullable: true,
+  },
+  // Largest distance, on every descriptor (normalised to its range, 0..1),
+  // between a player's sound and its target for the player to match it.
+  matchTolerance: {
+    type: 'float',
+    default: 0.1,
+    min: 0.01,
+    max: 0.5,
+  },
+  // How close each player is to their target, set by the server about 10 times a
+  // second: { [id]: { config, closeness, matched } }, `config` being the index of
+  // the player's configuration in the target and `closeness` 1 minus the
+  // normalised distance of the descriptor farthest from it (a player matches
+  // when closeness >= 1 - matchTolerance).
+  targetMatch: {
+    type: 'any',
+    default: {},
+  },
+  // Indexes of the players matching their target, as [[...indexes]], set by the
+  // server. Matching players score 1 point per second.
   matched: {
     type: 'any',
     default: [[]],
+  },
+  // Display: one slice of the radar per player instead of all on the same axes.
+  radarSplit: {
+    type: 'boolean',
+    default: false,
   },
   // Sum of every player's score, maintained by the server. Values above `max` are
   // silently clamped, and many players pass 1000 quickly, hence the generous ceiling.

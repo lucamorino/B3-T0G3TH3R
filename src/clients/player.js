@@ -3,6 +3,7 @@ import { Client } from '@soundworks/core/client.js';
 import { loadConfig, launcher } from '@soundworks/helpers/browser.js';
 import { html, render } from 'lit';
 import '@ircam/sc-components';
+import devicemotion from '@ircam/devicemotion';
 
 import "../lib/guardrails.js";
 
@@ -12,6 +13,9 @@ import LoopSampler from '../lib/LoopSampler.js';
 import { playerColor } from './palette.js';
 import { getDeviceId, waitForAssignment, openNicknameScreen, showGameFull } from './identity.js';
 import { canDecodeOpus } from '../lib/audio-format.js';
+import { metronomeGrid, gridPosition, samplesPerBar, SAMPLE_RATE } from '../lib/metronome.js';
+import { DESCRIPTORS, normalise } from '../lib/descriptors.js';
+import setupAudioSharing from '../lib/audio-sharing.js';
 
 import pluginPlatformInit from '@soundworks/plugin-platform-init/client.js';
 import pluginSync from '@soundworks/plugin-sync/client.js';
@@ -48,8 +52,25 @@ async function main($container) {
   console.log(audioContext.sampleRate);
   console.log(audioContext.baseLatency);
 
+  // Motion sensors, for the tilt layer. On iOS they need the player's permission,
+  // asked on the platform-init tap, and over https. A refusal, or a phone without
+  // sensors, must not keep the player out of the game: the wrapper always reports
+  // the feature as available, and the tilt layer is just left out for that phone.
+  let motionPermission = 'refused';
+  const motionFeature = {
+    async requestPermission() {
+      try {
+        motionPermission = await devicemotion.requestPermission();
+      } catch (err) {
+        console.warn('Could not access the motion sensors:', err);
+      }
+      return 'granted';
+    },
+  };
+
   client.pluginManager.register('platform-init', pluginPlatformInit, {
     audioContext,
+    devicemotion: motionFeature,
   });
   client.pluginManager.register('sync', pluginSync, {
     getTimeFunction: () => audioContext.currentTime,
@@ -110,6 +131,28 @@ async function main($container) {
   // publishes on the `global` state. `display` and `controller` use the collections.
 
   control.set({ id: index });
+
+  // Tilt: gravity along the phone's x and y axes, in g (-1..1), and when it was
+  // last measured.
+  const tilt = { x: 0, y: 0, time: -Infinity };
+  let motionReported = false;
+
+  if (motionPermission === 'granted') {
+    devicemotion.addEventListener((e) => {
+      const g = e.accelerationIncludingGravity;
+      if (!Number.isFinite(g?.x) || !Number.isFinite(g?.y)) return;
+      tilt.x = Math.max(-1, Math.min(1, g.x / 9.81));
+      tilt.y = Math.max(-1, Math.min(1, g.y / 9.81));
+      tilt.time = performance.now();
+      if (!motionReported) {
+        motionReported = true;
+        control.set({ motion: true });
+      }
+    });
+  }
+
+  // Pad: dot position (0..1) and whether the player touches it, kept by setupUI().
+  const pad = { x: 0.5, y: 0.5, active: false };
 
   // Create gain node and connect it to audio output
   const outputNode = audioContext.createGain();
@@ -192,15 +235,26 @@ async function main($container) {
       return;
   }
 
-  // Connect the device to the web audio graph (dry + reverb send)
+  // Connect the device to the web audio graph (volume, then dry + reverb send)
   const dryGain = audioContext.createGain();
   dryGain.gain.value = 0.5;
   dryGain.connect(outputNode);
+  const volumeGain = audioContext.createGain();
+  volumeGain.gain.value = user.get('volume');
   const padGain = audioContext.createGain();
   padGain.gain.value = 0.25;
-  device.node.connect(padGain);
+  device.node.connect(volumeGain);
+  volumeGain.connect(padGain);
   padGain.connect(dryGain);
   padGain.connect(reverbConvolver);
+
+  // Audio shared with other phones (see src/lib/audio-sharing.js): this phone's
+  // RNBO output goes to the phones it is routed to in the controller's matrix,
+  // and what they send comes into its RNBO input.
+  const sharedInput = audioContext.createGain();
+  sharedInput.connect(device.node);
+  setupAudioSharing({ client, audioContext, index, source: device.node, destination: sharedInput, user })
+    .catch((err) => console.error('[webrtc] could not set up audio sharing:', err));
 
   // Analysis values are collected here and sent together on a fixed 10Hz tick, the
   // rate the server evaluates matches at. Sent as they were produced, they made ~49
@@ -231,6 +285,14 @@ async function main($container) {
     return smoothed[key];
   }
 
+  // The radar and the matching use the features heavily smoothed. The
+  // synchronisation looks at how they evolve within a bar, so the bar recorder
+  // samples them only lightly smoothed, normalised to the descriptors' ranges.
+  const soundNow = { sharpness: 0, loudness: 0, spectralCentroid: 0, dissonance: 0, spectralComplexity: 0 };
+  function trackSound(key, value) {
+    if (Number.isFinite(value)) soundNow[key] = 0.5 * value + 0.5 * soundNow[key];
+  }
+
   // Essentia spectral analysis
   await essentiaScriptsRequest;
   const essentiaModule = await EssentiaWASM();
@@ -240,13 +302,6 @@ async function main($container) {
   analyserNode.fftSize = 2048;
   device.node.connect(analyserNode);
   const timeDomainData = new Float32Array(analyserNode.fftSize);
-
-  // The matched-state flash only needs the level of the sound: 256 samples are
-  // enough for that, instead of re-reading the 2048 the Essentia analysis uses.
-  const levelAnalyser = audioContext.createAnalyser();
-  levelAnalyser.fftSize = 256;
-  device.node.connect(levelAnalyser);
-  const levelData = new Float32Array(levelAnalyser.fftSize);
 
   let lastAnalysisTime = 0;
   const analysisInterval = 100; // ms between state updates
@@ -278,6 +333,10 @@ async function main($container) {
         ({ dissonance: dissonanceVal } = essentia.Dissonance(peaks.frequencies, peaks.magnitudes));
       }
 
+      trackSound('spectralCentroid', centroidVal);
+      trackSound('spectralComplexity', spectralComplexityVal);
+      trackSound('dissonance', dissonanceVal);
+
       const centroid = smooth('centroid', Number.isFinite(centroidVal) ? centroidVal : 0);
       const spectralComplexity = smooth('spectralComplexity', Number.isFinite(spectralComplexityVal) ? spectralComplexityVal : 0);
       const dissonance = smooth('dissonance', Number.isFinite(dissonanceVal) ? dissonanceVal : 0);
@@ -300,17 +359,20 @@ async function main($container) {
   sendMessageToInport(device, 'goal', global.get('goal'));
 
   let localScore = user.get('local_score'); // restored when rejoining
-  let isMatched = false;
+  let isMatched = false; // matching the target
+  let myMatch = null; // { config, closeness, matched }, see global `targetMatch`
   let matchGraceTimeout = null;
   let scoreInterval = null;
+  let mySync = null; // this player's synchronisation in the last bar
   let timerDisplay = '--:--';
   let timerInterval = null;
   let interfaceHidden = false; // mirrors renderApp()'s hideInterface
 
   // Full-screen layer behind the app (#background-layer in app.scss), flashing in
-  // the player's colour while matched. Only its opacity changes from frame to
-  // frame, and it sits on its own compositor layer, so that does not repaint the
-  // page. Prepended to <body>: outside the part of it that lit renders the app into.
+  // the player's colour on the pulses while matching the target. Only its opacity changes
+  // from frame to frame, and it sits on its own compositor layer, so that does not
+  // repaint the page. Prepended to <body>: outside the part of it that lit renders
+  // the app into.
   const backgroundLayer = document.createElement('div');
   backgroundLayer.id = 'background-layer';
   document.body.prepend(backgroundLayer);
@@ -335,9 +397,17 @@ async function main($container) {
     setBackground(backgroundColor, '0');
   }
 
-  // The score counts locally at 10Hz, but is only published twice a second: it is
-  // only ever shown rounded to whole points, so the display, which shows it live,
-  // loses nothing. The exact value is published whenever the counter stops.
+  // Each bar, the server tells every player how synchronised they were (see
+  // server.js): shown, it does not score.
+  function applySyncResult(result) {
+    mySync = result?.players?.[index] ?? null;
+    renderApp();
+  }
+
+  // While the player matches the target (see server.js), the score counts locally
+  // at 10Hz, 1 point per second, and is published twice a second: it is only ever
+  // shown rounded to whole points. The exact value is published whenever the
+  // counter stops.
   const SCORE_PUBLISH_EVERY = 5; // ticks
 
   function startScoreCounter() {
@@ -358,9 +428,31 @@ async function main($container) {
     }
   }
 
-  function stopMatched() {
+  function applyMatched(raw) {
+    const matchedIds = Array.isArray(raw?.[0]) ? raw[0] : [];
+    if (matchedIds.includes(index)) {
+      if (matchGraceTimeout) { clearTimeout(matchGraceTimeout); matchGraceTimeout = null; }
+      if (!isMatched) {
+        isMatched = true;
+        startScoreCounter();
+      }
+    } else if (isMatched && !matchGraceTimeout) {
+      // a short grace, so a single missed evaluation does not break the match
+      matchGraceTimeout = setTimeout(() => {
+        matchGraceTimeout = null;
+        isMatched = false;
+        stopScoreCounter();
+        hideBackground();
+        renderApp();
+      }, 300);
+    }
+  }
+
+  function resetSync() {
     if (matchGraceTimeout) { clearTimeout(matchGraceTimeout); matchGraceTimeout = null; }
     isMatched = false;
+    myMatch = null;
+    mySync = null;
     stopScoreCounter();
     hideBackground();
   }
@@ -368,9 +460,11 @@ async function main($container) {
   // Listen for messages from RNBO device
   device.messageEvent.subscribe((ev) => {
     if (ev.tag === "out2") {
+      trackSound('sharpness', ev.payload);
       queueControl({ sharpness: smooth('sharpness', ev.payload) });
     }
     if (ev.tag === "out3") {
+      trackSound('loudness', ev.payload);
       queueControl({ loudness: smooth('loudness', ev.payload) });
     }
   });
@@ -398,15 +492,14 @@ async function main($container) {
   }
 
   function applyPhase(phase) {
-    stopMatched();
+    resetSync();
     setupTimer();
     playerLoop(phase);
     renderApp();
 
     if (phase === 'playing') {
-      sendMessageToInport(device, 'start', [global.get('start')]);
       const last = device._lastTouch || [50, 50];
-      sendMessageToInport(device, 'touch', [last[0], last[1], global.get('slider')]);
+      sendMessageToInport(device, 'touch', last);
       padGain.gain.cancelScheduledValues(audioContext.currentTime);
       padGain.gain.setValueAtTime(0, audioContext.currentTime);
       padGain.gain.linearRampToValueAtTime(0.25, audioContext.currentTime + 0.5);
@@ -432,13 +525,6 @@ async function main($container) {
       setupTimer();
       renderApp();
     }
-    if ('start' in updates && global.get('phase') === 'playing') {
-      sendMessageToInport(device, 'start', [updates['start']]);
-    }
-    if ('slider' in updates) {
-      const last = device._lastTouch || [50, 50];
-      sendMessageToInport(device, 'touch', [last[0], last[1], updates['slider']]);
-    }
     if ('global_score' in updates) {
       renderApp();
     }
@@ -447,43 +533,51 @@ async function main($container) {
       user.set({ local_score: 0 });
       renderApp();
     }
-    if ('matched' in updates) {
-      const raw = updates['matched'];
-      const matchedIds = Array.isArray(raw[0]) ? raw[0] : raw;
-      const amMatched = matchedIds.includes(index);
-
-      if (amMatched) {
-        if (matchGraceTimeout) { clearTimeout(matchGraceTimeout); matchGraceTimeout = null; }
-        if (!isMatched) {
-          isMatched = true;
-          startScoreCounter();
-        }
-      } else {
-        if (isMatched && !matchGraceTimeout) {
-          matchGraceTimeout = setTimeout(() => {
-            matchGraceTimeout = null;
-            stopMatched();
-            renderApp();
-          }, 100);
-        }
+    if ('sync' in updates) {
+      applySyncResult(updates['sync']);
+    }
+    if ('targetMatch' in updates) {
+      const next = updates['targetMatch']?.[index] ?? null;
+      if (JSON.stringify(next) !== JSON.stringify(myMatch)) {
+        myMatch = next;
+        renderApp();
       }
+    }
+    if ('matched' in updates) {
+      applyMatched(updates['matched']);
+    }
+    if ('pulsesPerBar' in updates) {
+      renderApp(); // pulse strip
+    }
+    if ('metronomeOrigin' in updates) {
+      restartClick();
     }
   });
 
   // Sound parameters set from the controller, forwarded to the RNBO device.
-  function applySound(values) {
-    if ('style' in values) sendMessageToInport(device, 'style', values['style']);
-    if ('mod' in values) sendMessageToInport(device, 'mod', [values['mod']]);
-    if ('fade' in values) sendMessageToInport(device, 'fade', [values['fade']]);
-    if ('env' in values) sendMessageToInport(device, 'env', values['env']);
-    if ('LFO' in values) sendMessageToInport(device, 'LFO', values['LFO']);
-    if ('volume' in values) sendMessageToInport(device, 'volume', [values['volume']]);
-    for (const name of ['fb_gain', 'fb_trim']) {
+  const presets = patcher.presets || [];
+  const RNBO_PARAMS = ['fb_gain', 'fb_trim', 'bp_q', 'phase_q'];
+
+  function setParams(values) {
+    for (const name of RNBO_PARAMS) {
       if (name in values) {
         const param = getParameter(device, name);
         if (param) param.value = values[name];
       }
     }
+  }
+
+  function applySound(values) {
+    if ('preset' in values && presets[values['preset']]) {
+      device.setPreset(presets[values['preset']].preset);
+      // the preset overwrites the parameters set from the controller
+      setParams(user.getValues());
+    }
+    if ('style' in values) sendMessageToInport(device, 'style', values['style']);
+    if ('mod' in values) sendMessageToInport(device, 'mod', [values['mod']]);
+    if ('fade' in values) sendMessageToInport(device, 'fade', [values['fade']]);
+    if ('volume' in values) volumeGain.gain.setTargetAtTime(values['volume'], audioContext.currentTime, 0.02);
+    setParams(values);
   }
 
   user.onUpdate(updates => {
@@ -493,20 +587,153 @@ async function main($container) {
     applySound(updates);
   });
 
-  function updateBackground() {
-    if (isMatched) {
-      levelAnalyser.getFloatTimeDomainData(levelData);
-      let sum = 0;
-      for (let i = 0; i < levelData.length; i++) sum += Math.abs(levelData[i]);
-      const amplitude = (sum / levelData.length) * 20;
-      setBackground(myColorRgb, Math.min(0.55, amplitude).toFixed(2));
+  const myColorRgb = `rgb(${myColor.r}, ${myColor.g}, ${myColor.b})`;
+
+  // -------------------------------------------------------------------
+  // METRONOME: visual pulse, optional click
+  // -------------------------------------------------------------------
+  // Decay time (s) of a pulse's flash.
+  const PULSE_DECAY = 0.12;
+
+  // Where the current time is on the metronome grid, while playing.
+  function currentPosition() {
+    if (global.get('phase') !== 'playing') return null;
+    return gridPosition(metronomeGrid(global), sync.getSyncTime());
+  }
+
+  function pulseEnvelope(position) {
+    return position ? Math.exp(-position.sincePulse / PULSE_DECAY) : 0;
+  }
+
+  function updateBackground(position) {
+    if (isMatched && position) {
+      const accent = position.pulse === 0 ? 0.6 : 0.4;
+      setBackground(myColorRgb, (accent * pulseEnvelope(position)).toFixed(2));
       return;
     }
 
     hideBackground();
   }
 
-  const myColorRgb = `rgb(${myColor.r}, ${myColor.g}, ${myColor.b})`;
+  // Pulse strip (one dot per pulse of the bar, the current one lit) and the ring
+  // around the pad, flashing on every pulse, stronger on the first of the bar.
+  // Only opacities change, which does not repaint the page.
+  function drawPulse(position) {
+    const envelope = pulseEnvelope(position);
+    const strip = document.getElementById('pulse-strip');
+    if (strip) {
+      for (let i = 0; i < strip.children.length; i++) {
+        const lit = position !== null && i === position.pulse;
+        strip.children[i].style.opacity = lit ? (0.4 + 0.6 * envelope).toFixed(2) : '0.15';
+      }
+    }
+    const ring = document.getElementById('pulse-ring');
+    if (ring) {
+      const accent = position && position.pulse === 0 ? 1 : 0.5;
+      ring.style.opacity = (accent * envelope).toFixed(2);
+    }
+  }
+
+  // Click on every pulse (global `click`), scheduled on the sync time.
+  function playClick(time, downbeat) {
+    const osc = audioContext.createOscillator();
+    const env = audioContext.createGain();
+    osc.frequency.value = downbeat ? 1600 : 1000;
+    env.gain.setValueAtTime(0, time);
+    env.gain.linearRampToValueAtTime(0.3, time + 0.002);
+    env.gain.exponentialRampToValueAtTime(0.001, time + 0.04);
+    osc.connect(env).connect(outputNode);
+    osc.start(time);
+    osc.stop(time + 0.05);
+  }
+
+  function clickEngine(currentTime, processorTime) {
+    const grid = metronomeGrid(global);
+    if (global.get('phase') !== 'playing' || grid.origin <= 0) {
+      return currentTime + 0.25; // check again later
+    }
+    if (currentTime < grid.origin - 0.001) return grid.origin;
+
+    const count = Math.round((currentTime - grid.origin) / grid.pulse);
+    const onPulse = Math.abs(currentTime - (grid.origin + count * grid.pulse)) < 0.01;
+    if (onPulse && global.get('click')) {
+      playClick(processorTime, count % grid.pulsesPerBar === 0);
+    }
+    const next = Math.floor((currentTime - grid.origin) / grid.pulse + 1e-6) + 1;
+    return grid.origin + next * grid.pulse;
+  }
+
+  // The grid moved: start again from it.
+  function restartClick() {
+    if (scheduler.has(clickEngine)) scheduler.remove(clickEngine);
+    scheduler.add(clickEngine, sync.getSyncTime());
+  }
+
+  restartClick();
+
+  // -------------------------------------------------------------------
+  // BAR RECORDER: what the player does during each bar, sampled on the metronome
+  // grid at SAMPLE_RATE, and reported to the server once the bar is over
+  // -------------------------------------------------------------------
+  // Tilt counts as missing when no motion event came for this long (ms).
+  const MOTION_TIMEOUT = 250;
+  // Reports carry 3 decimals, plenty for normalised values.
+  const round3 = value => Math.round(value * 1000) / 1000;
+
+  let recording = null;
+
+  function newRecording(grid, bar) {
+    const n = samplesPerBar(grid);
+    const empty = () => new Array(n).fill(null);
+    return { bar, origin: grid.origin, n, touch: empty(), tilt: empty(), sound: empty(), active: empty() };
+  }
+
+  // Missing samples (a late timer tick) take the value of the previous one; a
+  // layer missing more than a quarter of the bar, e.g. when the phone joined
+  // mid-bar or has no motion sensors, is not reported.
+  function finishSeries(series) {
+    const present = series.filter(sample => sample !== null).length;
+    if (present < series.length * 0.75) return null;
+    let last = series.find(sample => sample !== null);
+    return series.map(sample => (last = sample ?? last).map(round3));
+  }
+
+  function sendRecording(rec) {
+    control.set({
+      bar: {
+        bar: rec.bar,
+        origin: rec.origin,
+        active: round3(rec.active.filter(Boolean).length / rec.n),
+        touch: finishSeries(rec.touch),
+        tilt: finishSeries(rec.tilt),
+        sound: finishSeries(rec.sound),
+      },
+    });
+  }
+
+  function recordSample() {
+    const grid = metronomeGrid(global);
+    const position = currentPosition();
+
+    if (recording !== null && (position === null || position.bar !== recording.bar || grid.origin !== recording.origin)) {
+      // the bar is over: report it, unless the grid changed or a bar was skipped
+      if (position !== null && grid.origin === recording.origin && position.bar === recording.bar + 1) {
+        sendRecording(recording);
+      }
+      recording = null;
+    }
+    if (position === null) return;
+    if (recording === null) recording = newRecording(grid, position.bar);
+
+    const slot = Math.min(recording.n - 1, Math.floor(position.barTime * SAMPLE_RATE));
+    recording.touch[slot] = [pad.x, pad.y];
+    recording.tilt[slot] = performance.now() - tilt.time < MOTION_TIMEOUT ? [tilt.x, tilt.y] : null;
+    recording.sound[slot] = DESCRIPTORS.map(d => normalise(d, soundNow[d.key]));
+    recording.active[slot] = pad.active;
+  }
+
+  // Ticks twice per sample, so timer jitter does not leave slots empty.
+  setInterval(recordSample, 1000 / SAMPLE_RATE / 2);
 
   // -------------------------------------------------------------------
   // OSCILLOSCOPE
@@ -579,7 +806,9 @@ async function main($container) {
     if (timestamp - lastDrawTime < DRAW_INTERVAL - 4) return;
     lastDrawTime = timestamp;
 
-    updateBackground();
+    const position = currentPosition();
+    updateBackground(position);
+    drawPulse(position);
     drawOscilloscope();
   }
 
@@ -625,12 +854,20 @@ async function main($container) {
           </div>
         </div>
 
-        <!-- Info row: player colour + timer + global pts + my pts -->
+        <!-- Info row: player colour + timer + target closeness + sync + global pts + my pts -->
         <div id="info-row" style="display: ${hideInterface ? 'none' : 'flex'};">
           <div id="player-color-dot" style="background: ${myColor.stroke};"></div>
           <div class="score-item">
             <span class="score-label">Timer</span>
             <span class="score-value">${timerDisplay}</span>
+          </div>
+          <div class="score-item">
+            <span class="score-label">Target</span>
+            <span class="score-value ${isMatched ? 'synchronised' : ''}">${myMatch ? `${Math.round(myMatch.closeness * 100)}%` : '--'}</span>
+          </div>
+          <div class="score-item">
+            <span class="score-label">Sync</span>
+            <span class="score-value">${mySync && mySync.partner !== null ? `${Math.round(mySync.index * 100)}%` : '--'}</span>
           </div>
           <div class="score-item">
             <span class="score-label">Global</span>
@@ -642,6 +879,13 @@ async function main($container) {
           </div>
         </div>
 
+        <!-- Metronome: one dot per pulse of the bar -->
+        <div id="pulse-strip" style="display: ${hideInterface ? 'none' : 'flex'};">
+          ${Array.from({ length: global.get('pulsesPerBar') }, (_, i) => html`
+            <span class="pulse-dot ${i === 0 ? 'downbeat' : ''}"></span>
+          `)}
+        </div>
+
         <!-- Oscilloscope -->
         <div id="oscilloscope-container" style="display: ${hideInterface ? 'none' : 'flex'};">
           <canvas id="oscilloscope" width="320" height="70"></canvas>
@@ -649,6 +893,7 @@ async function main($container) {
 
         <div id="xy-pad-container" style="display: ${hideInterface ? 'none' : 'block'};">
           <canvas id="xy-pad" width="320" height="320"></canvas>
+          <div id="pulse-ring"></div>
         </div>
 
       </div>
@@ -656,7 +901,7 @@ async function main($container) {
   }
 
   renderApp();
-  setupUI(device, control, audioContext, padGain, global, returning);
+  setupUI(device, control, audioContext, padGain, global, returning, pad);
   requestAnimationFrame(drawLoop);
 
   // ---- late-join / initial state sync ----
@@ -664,7 +909,14 @@ async function main($container) {
   // created RNBO device: user.onUpdate only fires on changes, existing state is
   // silent on reconnect.
   applyPhase(global.get('phase'));
-  applySound(user.getValues());
+  // The preset and parameters, then whatever the controller changed from the
+  // defaults (left out, the patch keeps its own values for the messages).
+  const defaults = user.getDefaults();
+  const changed = Object.fromEntries(Object.entries(user.getValues())
+    .filter(([key, value]) => JSON.stringify(value) !== JSON.stringify(defaults[key])));
+  applySound({ preset: user.get('preset'), volume: user.get('volume'), ...changed });
+  setParams(user.getValues());
+  applySyncResult(global.get('sync'));
 }
 
 function waitUntilVisible() {
@@ -756,13 +1008,14 @@ function sendMessageToInport(device, inportTag, values) {
   device.scheduleEvent(messageEvent);
 }
 
-function setupUI(device, control, audioContext, padGain, global, returning) {
+function setupUI(device, control, audioContext, padGain, global, returning, pad) {
     const canvas = document.getElementById('xy-pad');
     const ctx = canvas.getContext('2d');
     const accentColor = getComputedStyle(document.documentElement)
       .getPropertyValue('--sw-accent-color').trim() || '#ff44b4';
 
     const updateControlActive = (active) => {
+      pad.active = active;
       control.set({ active: active ? 1 : 0 });
     };
 
@@ -812,10 +1065,12 @@ function setupUI(device, control, audioContext, padGain, global, returning) {
     }
 
     function sendTouch() {
+        pad.x = dotX / padSize;
+        pad.y = dotY / padSize;
         const touchX = Math.round((dotX / padSize) * 100);
         const touchY = Math.round((dotY / padSize) * 100);
         device._lastTouch = [touchX, touchY];
-        sendMessageToInport(device, 'touch', [touchX, touchY, global.get('slider')]);
+        sendMessageToInport(device, 'touch', [touchX, touchY]);
     }
 
     function release(e) {
@@ -825,6 +1080,7 @@ function setupUI(device, control, audioContext, padGain, global, returning) {
         padGain.gain.cancelScheduledValues(audioContext.currentTime);
         padGain.gain.setValueAtTime(padGain.gain.value, audioContext.currentTime);
         padGain.gain.linearRampToValueAtTime(0.25, audioContext.currentTime + 0.2);
+        sendMessageToInport(device, 'start', [0]);
         updateControlActive(false);
     }
 
@@ -842,6 +1098,10 @@ function setupUI(device, control, audioContext, padGain, global, returning) {
         padGain.gain.setValueAtTime(padGain.gain.value, audioContext.currentTime);
         padGain.gain.linearRampToValueAtTime(1, audioContext.currentTime + 0.2);
         sendTouch();
+        // as in NINA_B3-H4RSH: the patch plays while touched, and each new touch
+        // triggers it
+        sendMessageToInport(device, 'start', [1]);
+        sendMessageToInport(device, 'trigger', [1]);
         updateControlActive(true);
     });
 
@@ -866,7 +1126,9 @@ function setupUI(device, control, audioContext, padGain, global, returning) {
         'How to play:',
         'Tap and hold the pad to generate the sound.',
         'Drag around to shape the sound.',
-        'Tune with other players to collect points.',
+        'Your sound reaches the other players, theirs reaches you.',
+        'Together, bring your sounds to the target on the screen.',
+        'While your sound matches it, you collect points.',
       ],
       [
         'Turn up the volume on your device.',
